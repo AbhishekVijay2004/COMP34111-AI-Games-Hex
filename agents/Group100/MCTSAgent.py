@@ -1,7 +1,8 @@
 from collections import defaultdict
-import copy
 from math import log, sqrt
+import copy
 import random
+import time
 
 from src.AgentBase import AgentBase
 from src.Board import Board
@@ -79,6 +80,9 @@ class MCTSAgent(AgentBase):
                 Move: The agent move
         """
 
+        start_time = time.time()
+        max_time = 2.0
+
         if opp_move:
             if opp_move.x == -1 and opp_move.y == -1:  # Swap move
                 return Move(board.size // 2, board.size // 2)  # Center is often a good move after swap
@@ -87,8 +91,8 @@ class MCTSAgent(AgentBase):
         root = self.game_tree[str(root_state)]
         root["unexplored_moves"] = self.get_possible_moves(board)
 
-        NUM_ITERATIONS = 1000
-        for _ in range(NUM_ITERATIONS):
+        iterations = 0
+        while time.time() - start_time < max_time:
 
             state = copy.deepcopy(root_state)
             current_node = root
@@ -128,6 +132,10 @@ class MCTSAgent(AgentBase):
 
             # 4. Backpropagation
             self.backpropagate(path, result)
+
+            iterations += 1
+
+        print(f"MCTS Iterations: {iterations}, Time Spent: {time.time() - start_time:.2f}s")
 
         # Return the best move
         if not root["children"]:

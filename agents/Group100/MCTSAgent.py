@@ -97,6 +97,24 @@ class MCTSAgent(AgentBase):
         return valid_moves
     
 
+    def get_all_positions_for_colour(self, board: Board, colour: Colour) -> list[Move]:
+        """ Get all nodes that are placed down, of that colour, in the current game state. """
+        all_positions = []
+
+        for x in range(board.size):
+            for y in range(board.size):
+                t = board.tiles[x][y]
+                if t.colour is colour:
+                    all_positions.append(Move(x, y))
+
+        return all_positions
+    
+
+    def is_valid_move(self, board: Board, move: Move) -> bool:
+        """ Check if a move is valid by checking whether the tile is empty, and it's not out of bounds. """
+        return 0 <= move.x < board.size and 0 <= move.y < board.size and board.tiles[move.x][move.y].colour is None
+    
+
     def make_move(self, turn: int, board: Board, opp_move: Move | None) -> Move:
         """ The game engine will call this method to request a move from the agent.
             If the agent is to make the first move, opp_move will be None.
@@ -198,7 +216,7 @@ class MCTSAgent(AgentBase):
         
         # Loop forever until we reach a terminal node or the game ends
         while not simulation_board.has_ended(Colour.RED) and not simulation_board.has_ended(Colour.BLUE):
-            moves = self.get_possible_moves(simulation_board)
+            moves = self.get_possible_two_bridges(simulation_board, simulation_colour)
 
             # If no moves available (we are at a terminal node)
             if not moves:
@@ -224,3 +242,37 @@ class MCTSAgent(AgentBase):
 
             # Move to parent
             node = node.parent
+
+
+    def get_possible_two_bridges(self, board: Board, colour: Colour) -> list[Move]:
+        """ Get all possible two-bridge moves. """
+
+        two_bridges = []
+        current_nodes = self.get_all_positions_for_colour(board, colour)
+
+        for node in current_nodes:
+            if self.is_valid_move(board, Move(node.x - 1, node.y - 1)):
+                two_bridges.append(Move(node.x - 1, node.y - 1))
+                
+            elif self.is_valid_move(board, Move(node.x + 1, node.y - 2)):
+                two_bridges.append(Move(node.x + 1, node.y - 2))
+
+            elif self.is_valid_move(board, Move(node.x + 2, node.y - 1)):
+                two_bridges.append(Move(node.x + 2, node.y - 1))
+
+            elif self.is_valid_move(board, Move(node.x + 1, node.y + 1)):
+                two_bridges.append(Move(node.x + 1, node.y + 1))
+
+            elif self.is_valid_move(board, Move(node.x - 1, node.y + 2)):
+                two_bridges.append(Move(node.x - 1, node.y + 2))
+
+            elif self.is_valid_move(board, Move(node.x - 2, node.y + 1)):
+                two_bridges.append(Move(node.x - 2, node.y + 1))
+
+        # print(two_bridges)
+
+        return two_bridges
+                
+    
+
+

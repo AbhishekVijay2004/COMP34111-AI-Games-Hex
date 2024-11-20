@@ -114,7 +114,7 @@ class MCTSAgent(AgentBase):
         """
 
         start_time = time.time()
-        max_time = 4.8
+        max_time = 5
 
         # If opponent swaps
         if opp_move and opp_move.x == -1 and opp_move.y == -1:  # Swap move
@@ -156,12 +156,15 @@ class MCTSAgent(AgentBase):
             current_node = max(current_node.children, key=lambda child: child.calculate_uct_score())  # Select the best child
 
         # If the current node has unexplored children, the current node will be returned
+        # This is the node that will be expanded to explore the children
 
         return current_node
         
 
     def expand_node(self, node: MCTSNode) -> MCTSNode:
-        """ Performs exploration. """
+        """ Performs exploration to add children to the current node.
+            current_node.unexplored_children is reduced by 1, and current_node.children is increased by 1.
+        """
         if node.unexplored_children:
             # Select a random move
             move = random.choice(node.unexplored_children)
@@ -207,7 +210,7 @@ class MCTSAgent(AgentBase):
             simulation_colour = Colour.opposite(simulation_colour)  # Swap colour to simulate opposite player's move
         
         # Returns true if this agent has won, false otherwise
-        return simulation_board.has_ended(self._colour)
+        return simulation_board._winner == self.colour
     
 
     def backpropagate(self, node: MCTSNode, won: bool):

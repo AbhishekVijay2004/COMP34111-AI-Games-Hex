@@ -111,7 +111,7 @@ class MCTSAgent(AgentBase):
     
 
     def is_valid_move(self, board: Board, move: Move) -> bool:
-        """ Check if a move is valid by checking whether the tile is empty, and it's not out of bounds. """
+        """ Checks if a move is within the board boundaries and does not contain a colour. """
         return 0 <= move.x < board.size and 0 <= move.y < board.size and board.tiles[move.x][move.y].colour is None
     
 
@@ -132,7 +132,7 @@ class MCTSAgent(AgentBase):
         """
 
         start_time = time.time()
-        max_time = 5
+        max_time = 4.9
 
         # If opponent swaps
         if opp_move and opp_move.x == -1 and opp_move.y == -1:  # Swap move
@@ -216,16 +216,23 @@ class MCTSAgent(AgentBase):
         
         # Loop forever until we reach a terminal node or the game ends
         while not simulation_board.has_ended(Colour.RED) and not simulation_board.has_ended(Colour.BLUE):
-            moves = self.get_possible_two_bridges(simulation_board, simulation_colour)
+            bridges = self.get_possible_two_bridges(simulation_board, simulation_colour)
 
             # If no moves available (we are at a terminal node)
-            if not moves:
-                break
+            if not bridges:
+                moves = self.get_possible_moves(simulation_board)
 
-            # Otherwise, simulate a random move
-            random_move = random.choice(moves)
-            simulation_board.set_tile_colour(random_move.x, random_move.y, simulation_colour)  # Make the move
-            simulation_colour = Colour.opposite(simulation_colour)  # Swap colour to simulate opposite player's move
+                if not moves:
+                    break
+                
+                random_move = random.choice(moves)
+                simulation_board.set_tile_colour(random_move.x, random_move.y, simulation_colour)  # Make the move
+                simulation_colour = Colour.opposite(simulation_colour)  # Swap colour to simulate opposite player's move
+            else:
+                # Otherwise, simulate a random move
+                random_move = random.choice(bridges)
+                simulation_board.set_tile_colour(random_move.x, random_move.y, simulation_colour)  # Make the move
+                simulation_colour = Colour.opposite(simulation_colour)  # Swap colour to simulate opposite player's move
         
         # Returns true if this agent has won, false otherwise
         return simulation_board._winner == self.colour
@@ -250,29 +257,38 @@ class MCTSAgent(AgentBase):
         two_bridges = []
         current_nodes = self.get_all_positions_for_colour(board, colour)
 
+        # This looks for a bridge from the current node where a bridge is a node that is 
+        # diagonally opposite and both center nodes are valid moves.
         for node in current_nodes:
-            if self.is_valid_move(board, Move(node.x - 1, node.y - 1)):
+            if self.is_valid_move(board, Move(node.x - 1, node.y - 1)) \
+            and self.is_valid_move(board, Move(node.x - 1, node.y)) \
+            and self.is_valid_move(board, Move(node.x, node.y - 1)):
                 two_bridges.append(Move(node.x - 1, node.y - 1))
                 
-            elif self.is_valid_move(board, Move(node.x + 1, node.y - 2)):
+            elif self.is_valid_move(board, Move(node.x + 1, node.y - 2)) \
+            and self.is_valid_move(board, Move(node.x, node.y - 1)) \
+            and self.is_valid_move(board, Move(node.x + 1, node.y - 1)):
                 two_bridges.append(Move(node.x + 1, node.y - 2))
 
-            elif self.is_valid_move(board, Move(node.x + 2, node.y - 1)):
+            elif self.is_valid_move(board, Move(node.x + 2, node.y - 1)) \
+            and self.is_valid_move(board, Move(node.x + 1, node.y - 1)) \
+            and self.is_valid_move(board, Move(node.x + 1, node.y)):
                 two_bridges.append(Move(node.x + 2, node.y - 1))
 
-            elif self.is_valid_move(board, Move(node.x + 1, node.y + 1)):
+            elif self.is_valid_move(board, Move(node.x + 1, node.y + 1)) \
+            and self.is_valid_move(board, Move(node.x + 1, node.y)) \
+            and self.is_valid_move(board, Move(node.x, node.y + 1)):
                 two_bridges.append(Move(node.x + 1, node.y + 1))
 
-            elif self.is_valid_move(board, Move(node.x - 1, node.y + 2)):
+            elif self.is_valid_move(board, Move(node.x - 1, node.y + 2)) \
+            and self.is_valid_move(board, Move(node.x, node.y + 1)) \
+            and self.is_valid_move(board, Move(node.x - 1, node.y + 1)):
                 two_bridges.append(Move(node.x - 1, node.y + 2))
 
-            elif self.is_valid_move(board, Move(node.x - 2, node.y + 1)):
+            elif self.is_valid_move(board, Move(node.x - 2, node.y + 1)) \
+            and self.is_valid_move(board, Move(node.x - 1, node.y + 1)) \
+            and self.is_valid_move(board, Move(node.x - 1, node.y)):
                 two_bridges.append(Move(node.x - 2, node.y + 1))
 
-        # print(two_bridges)
-
         return two_bridges
-                
-    
-
-
+        

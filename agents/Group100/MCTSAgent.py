@@ -1,4 +1,3 @@
-from collections import defaultdict
 from math import log, sqrt
 import copy
 import random
@@ -200,7 +199,6 @@ class MCTSAgent(AgentBase):
         return node
 
     
-
     def simulate(self, state: Board) -> bool:
         """ Play a random simulation to completion. 
         
@@ -213,26 +211,28 @@ class MCTSAgent(AgentBase):
 
         simulation_board = copy.deepcopy(state)
         simulation_colour = self._colour
+
+        bridges = self.get_possible_two_bridges(simulation_board, simulation_colour)
+        moves = self.get_possible_moves(simulation_board)
         
         # Loop forever until we reach a terminal node or the game ends
         while not simulation_board.has_ended(Colour.RED) and not simulation_board.has_ended(Colour.BLUE):
-            bridges = self.get_possible_two_bridges(simulation_board, simulation_colour)
-
-            # If no moves available (we are at a terminal node)
+            # If no bridges available
             if not bridges:
-                moves = self.get_possible_moves(simulation_board)
-
+                # If no moves available (we are at a terminal node)
                 if not moves:
                     break
                 
                 random_move = random.choice(moves)
                 simulation_board.set_tile_colour(random_move.x, random_move.y, simulation_colour)  # Make the move
-                simulation_colour = Colour.opposite(simulation_colour)  # Swap colour to simulate opposite player's move
+                moves.remove(random_move)
             else:
                 # Otherwise, simulate a random move
-                random_move = random.choice(bridges)
-                simulation_board.set_tile_colour(random_move.x, random_move.y, simulation_colour)  # Make the move
-                simulation_colour = Colour.opposite(simulation_colour)  # Swap colour to simulate opposite player's move
+                random_bridge_move = random.choice(bridges)
+                simulation_board.set_tile_colour(random_bridge_move.x, random_bridge_move.y, simulation_colour)  # Make the move
+                bridges.remove(random_bridge_move)
+            
+            simulation_colour = Colour.opposite(simulation_colour)  # Swap colour to simulate opposite player's move
         
         # Returns true if this agent has won, false otherwise
         return simulation_board._winner == self.colour

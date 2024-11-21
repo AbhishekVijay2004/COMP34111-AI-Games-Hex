@@ -21,7 +21,7 @@ class RaveMCTSNode:
     - Uses AMAF (All Moves As First) heuristic to share knowledge between nodes
     - Provides better estimates early in search when data is limited
     
-    Storage Optimisations:
+    Storage Optimizations:
     - move_amaf_wins/visits: Track move statistics independently
     - hash_value: Quick board position lookups
     - board: Cached board state to avoid recomputation
@@ -45,7 +45,7 @@ class RaveMCTSNode:
         """
         Calculate the AMAF value for a specific move using cached statistics.
         
-        Optimisation: Uses move-specific tracking instead of global RAVE values,
+        Optimization: Uses move-specific tracking instead of global RAVE values,
         which provides more accurate action value estimates and reduces noise
         from unrelated moves.
         """
@@ -96,11 +96,11 @@ class RaveMCTSNode:
         if won:
             self.move_amaf_wins[move] += 1
 
-class MCTSAgent(AgentBase):
+class RaveAgent(AgentBase):
     """
-    RAVE-enhanced MCTS agent with specialised optimisations for Hex gameplay.
+    RAVE-enhanced MCTS agent with specialized optimizations for Hex gameplay.
     
-    Key Optimisations:
+    Key Optimizations:
     - Move reversal instead of board copying in simulation
     - Strategic move ordering using evaluation cache
     - Early stopping based on visit statistics
@@ -139,7 +139,7 @@ class MCTSAgent(AgentBase):
 
     def switch_player(self, current_player: Colour) -> Colour:
         """
-        Optimise player switching using direct comparison instead of multiple checks.
+        Optimize player switching using direct comparison instead of multiple checks.
         Reduces branching and improves cache hit rate in the simulation phase.
         """
         if current_player == Colour.RED:
@@ -236,7 +236,7 @@ class MCTSAgent(AgentBase):
         for path in opp_paths:
             critical_moves.update(m for m in path if board.tiles[m[0]][m[1]].colour is None)
         
-        # Prioritise critical defensive moves
+        # Prioritize critical defensive moves
         if critical_moves:
             # Sort critical moves by evaluation
             critical_list = list(critical_moves)
@@ -507,7 +507,7 @@ class MCTSAgent(AgentBase):
            - Properly handles alternating players
            - Ensures moves get credited to right player
         
-        Optimisation:
+        Optimization:
         - Updates both MCTS and RAVE stats in one pass
         - Efficient move list processing
         - Minimal redundant calculations

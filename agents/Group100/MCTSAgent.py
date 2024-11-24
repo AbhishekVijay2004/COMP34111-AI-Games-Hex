@@ -7,6 +7,7 @@ from src.Colour import Colour
 from src.Move import Move
 from copy import deepcopy
 
+
 class RaveMCTSNode:
     """
     Enhanced MCTS node implementing RAVE (Rapid Action Value Estimation).
@@ -42,6 +43,7 @@ class RaveMCTSNode:
         self.move_amaf_wins = {}  # Track AMAF wins per move
         self.move_amaf_visits = {}  # Track AMAF visits per move
 
+
     def get_amaf_value(self, move: tuple[int, int]) -> float:
         """
         Calculate the AMAF value for a specific move using cached statistics.
@@ -54,6 +56,7 @@ class RaveMCTSNode:
         if visits == 0:
             return 0.0
         return self.move_amaf_wins.get(move, 0) / visits
+
 
     def ucb1(self, explore: float = 1.41, rave_const: float = 300) -> float:
         """
@@ -88,6 +91,7 @@ class RaveMCTSNode:
         
         return (1 - beta) * mcts_value + beta * amaf_value
 
+
     def update_amaf_stats(self, move: tuple[int, int], won: bool):
         """Update AMAF statistics for a specific move"""
         if move not in self.move_amaf_visits:
@@ -96,6 +100,7 @@ class RaveMCTSNode:
         self.move_amaf_visits[move] += 1
         if won:
             self.move_amaf_wins[move] += 1
+
 
 class MCTSAgent(AgentBase):
     """
@@ -138,6 +143,7 @@ class MCTSAgent(AgentBase):
         self.opponent_bridges = {} # Cache for opponent bridge positions
         self.defensive_scores = {} # Cache for defensive position scores
 
+
     def switch_player(self, current_player: Colour) -> Colour:
         """
         Optimise player switching using direct comparison instead of multiple checks.
@@ -147,6 +153,7 @@ class MCTSAgent(AgentBase):
             return Colour.BLUE
         return Colour.RED
 
+
     def get_player_moves(self, current_player: Colour, move: tuple[int, int], 
                         red_moves: list, blue_moves: list) -> None:
         """Add move to appropriate player's move list"""
@@ -155,10 +162,12 @@ class MCTSAgent(AgentBase):
         else:
             blue_moves.append(move)
 
+
     def get_valid_moves(self, board: Board) -> list[tuple[int, int]]:
         return [(i, j) for i in range(board.size)
                 for j in range(board.size)
                 if board.tiles[i][j].colour is None]
+
 
     def get_neighbor_moves(self, board: Board, x: int, y: int) -> list[tuple[int, int]]:
         """Get valid moves adjacent to existing pieces"""
@@ -170,6 +179,7 @@ class MCTSAgent(AgentBase):
                     board.tiles[nx][ny].colour is None):
                     neighbors.append((nx, ny))
         return neighbors
+
 
     def evaluate_move(self, board: Board, move: tuple[int, int]) -> float:
         """Enhanced move evaluation with defensive considerations"""
@@ -197,8 +207,10 @@ class MCTSAgent(AgentBase):
         score += bridge_score * 0.3
 
         # Two bridge forming potential
-        # two_bridge_score = self.get_possible_two_bridges(board, self.colour)
-        # score += two_bridge_score * 0.4
+        # If it forms a two bridge, this is a good move
+        two_bridge_score = self.get_two_bridges_score(board, move)
+        print("Two bridges score:", two_bridge_score)
+        score += two_bridge_score * 0.4
         
         # Edge control
         if self.colour == Colour.RED and (x == 0 or x == board.size-1):
@@ -219,6 +231,7 @@ class MCTSAgent(AgentBase):
 
         self.move_scores[move] = score
         return score
+
 
     def get_smart_moves(self, board: Board) -> list[tuple[int, int]]:
         """Enhanced move generation with defensive awareness"""
@@ -255,6 +268,7 @@ class MCTSAgent(AgentBase):
         moves.sort(key=lambda m: self.evaluate_move(board, m), reverse=True)
         return moves
 
+
     def find_critical_paths(self, board: Board, player: Colour) -> list[list[tuple[int, int]]]:
         """Find potentially winning paths for a player"""
         board_hash = self.hash_board(board)
@@ -281,6 +295,7 @@ class MCTSAgent(AgentBase):
         self.critical_paths[cache_key] = paths
         return paths
 
+
     def find_bridge_threats(self, board: Board, player: Colour) -> list[tuple[int, int]]:
         """Identify potential bridge formations by opponent"""
         board_hash = self.hash_board(board)
@@ -303,54 +318,72 @@ class MCTSAgent(AgentBase):
         self.opponent_bridges[cache_key] = threats
         return threats
 
-    def get_possible_two_bridges(self, board: Board, colour: Colour) -> int:
-        """ Get all possible two-bridge moves. """
 
-        # two_bridges = []
-        two_bridges_num = 0
-        current_nodes = self.get_all_positions_for_colour(board, colour)
+    def get_two_bridges_score(self, board: Board, move: tuple[int, int]) -> float:
+        """ 
+        Return a "two bridge" score that is calculated based on:
+            +1 for each two bridge created by making the given move. 
+            +0.5 for every opponent two bridge that is blocked by the given move.
 
-        # This looks for a bridge from the current node where a bridge is a node that is 
-        # diagonally opposite and both center nodes are valid moves.
-        for node in current_nodes:
-            if self.is_valid_move(board, Move(node.x - 1, node.y - 1)) \
-            and self.is_valid_move(board, Move(node.x - 1, node.y)) \
-            and self.is_valid_move(board, Move(node.x, node.y - 1)):
-                # two_bridges.append(Move(node.x - 1, node.y - 1))
-                two_bridges_num += 1
-                
-            elif self.is_valid_move(board, Move(node.x + 1, node.y - 2)) \
-            and self.is_valid_move(board, Move(node.x, node.y - 1)) \
-            and self.is_valid_move(board, Move(node.x + 1, node.y - 1)):
-                # two_bridges.append(Move(node.x + 1, node.y - 2))
-                two_bridges_num += 1
+        The more two bridges, the better the move. The more opponent two 
+        bridges that are blocked, the better the move.
 
-            elif self.is_valid_move(board, Move(node.x + 2, node.y - 1)) \
-            and self.is_valid_move(board, Move(node.x + 1, node.y - 1)) \
-            and self.is_valid_move(board, Move(node.x + 1, node.y)):
-                # two_bridges.append(Move(node.x + 2, node.y - 1))
-                two_bridges_num += 1
+        A move will have a higher score if it creates multiple two bridges.
 
-            elif self.is_valid_move(board, Move(node.x + 1, node.y + 1)) \
-            and self.is_valid_move(board, Move(node.x + 1, node.y)) \
-            and self.is_valid_move(board, Move(node.x, node.y + 1)):
-                # two_bridges.append(Move(node.x + 1, node.y + 1))
-                two_bridges_num += 1
+        This function assumes move is a valid move.
+        """
 
-            elif self.is_valid_move(board, Move(node.x - 1, node.y + 2)) \
-            and self.is_valid_move(board, Move(node.x, node.y + 1)) \
-            and self.is_valid_move(board, Move(node.x - 1, node.y + 1)):
-                # two_bridges.append(Move(node.x - 1, node.y + 2))
-                two_bridges_num += 1
+        two_bridges_score = 0
 
-            elif self.is_valid_move(board, Move(node.x - 2, node.y + 1)) \
-            and self.is_valid_move(board, Move(node.x - 1, node.y + 1)) \
-            and self.is_valid_move(board, Move(node.x - 1, node.y)):
-                # two_bridges.append(Move(node.x - 2, node.y + 1))
-                two_bridges_num += 1
+        # Creates a two bridge for current player
+        two_bridges_score += self.get_two_bridges(board, move, self.colour)
 
-        return two_bridges_num
+        # Blocks opponent two bridges
+        # This is not worth as much as prioritising our own bridges
+        opponent = self.colour.opposite()
+        two_bridges_score += (self.get_two_bridges(board, move, opponent) * 0.5)
+
+        return two_bridges_score
+
+
+    def get_two_bridges(self, board: Board, move: tuple[int, int], colour: Colour):
+        """ Returns the number of two bridges made by a given move for a given player. """
+        x, y = move
+        two_bridges_score = 0
+
+        if self.is_owned_by_player(board, (x - 1, y - 1), colour) \
+            and self.is_valid_move(board, (x - 1, y)) \
+            and self.is_valid_move(board, (x, y - 1)):
+             two_bridges_score += 1
+            
+        elif self.is_owned_by_player(board, (x + 1, y - 2), colour) \
+            and self.is_valid_move(board, (x, y - 1)) \
+            and self.is_valid_move(board, (x + 1, y - 1)):
+             two_bridges_score += 1
+
+        elif self.is_owned_by_player(board, (x + 2, y - 1), colour) \
+            and self.is_valid_move(board, (x + 1, y - 1)) \
+            and self.is_valid_move(board, (x + 1, y)):
+             two_bridges_score += 1
+
+        elif self.is_owned_by_player(board, (x + 1, y + 1), colour) \
+            and self.is_valid_move(board, (x + 1, y)) \
+            and self.is_valid_move(board, (x, y + 1)):
+             two_bridges_score += 1
+
+        elif self.is_owned_by_player(board, (x - 1, y + 2), colour) \
+            and self.is_valid_move(board, (x, y + 1)) \
+            and self.is_valid_move(board, (x - 1, y + 1)):
+             two_bridges_score += 1
+
+        elif self.is_owned_by_player(board, (x - 2, y + 1), colour) \
+            and self.is_valid_move(board, (x - 1, y + 1)) \
+            and self.is_valid_move(board, (x - 1, y)):
+             two_bridges_score += 1
+
+        return two_bridges_score
     
+
     def evaluate_defensive_position(self, board: Board, move: tuple[int, int]) -> float:
         """Evaluate move's defensive value"""
         board_hash = self.hash_board(board)
@@ -380,6 +413,7 @@ class MCTSAgent(AgentBase):
 
         self.defensive_scores[cache_key] = score
         return score
+
 
     def select_node(self, node: RaveMCTSNode, board: Board) -> tuple:
         """
@@ -416,12 +450,21 @@ class MCTSAgent(AgentBase):
 
         return node, played_moves
 
+
     def validate_board_state(self, board: Board) -> None:
         """Ensure board state is consistent"""
         self.current_board_state = deepcopy(board)
 
+
     def is_valid_move(self, board: Board, move: tuple[int, int]) -> bool:
-        """Enhanced move validation"""
+        """ 
+        Checks if a move is within the bounds of the board and that tile 
+        is not already taken by either player. 
+        
+        Returns:
+            - True; if move is valid and colour is None.
+            - False; otherwise.
+        """
         if not (0 <= move[0] < board.size and 0 <= move[1] < board.size):
             return False
         # Check both current state and provided board
@@ -430,6 +473,23 @@ class MCTSAgent(AgentBase):
                 return False
         return board.tiles[move[0]][move[1]].colour is None
     
+
+    def is_owned_by_player(self, board: Board, move: tuple[int, int], player: Colour) -> bool:
+        """ 
+        Checks if a tile/move is within the bounds of the board and it is owned by the specified player.
+        
+        Returns:
+            - True; if tile is within bounds and owned by the current player.
+            - False; otherwise.
+        """
+        # If not in bounds
+        if not (0 <= move[0] < board.size and 0 <= move[1] < board.size):
+            return False
+
+        # Returns True if owned by the specified player, false otherwise.
+        return board.tiles[move[0]][move[1]].colour is player
+
+
     def get_all_positions_for_colour(self, board: Board, colour: Colour) -> list[Move]:
         """ Get all nodes that are placed down, of that colour, in the current game state. """
         all_positions = []
@@ -441,6 +501,7 @@ class MCTSAgent(AgentBase):
                     all_positions.append(Move(x, y))
 
         return all_positions
+
 
     def expand(self, node: RaveMCTSNode, board: Board) -> RaveMCTSNode:
         """Improved expansion with move validation"""
@@ -463,6 +524,7 @@ class MCTSAgent(AgentBase):
             return child
         return node
 
+
     def hash_board(self, board: Board) -> int:
         """Fast board hashing for transposition table"""
         hash_value = 0
@@ -472,6 +534,7 @@ class MCTSAgent(AgentBase):
                 if color is not None:
                     hash_value ^= self._zobrist_table[(i, j, color)]
         return hash_value
+
 
     def simulate(self, board: Board) -> tuple:
         """
@@ -554,6 +617,7 @@ class MCTSAgent(AgentBase):
         }
         return result, red_moves, blue_moves
 
+
     def backpropagate(self, node: RaveMCTSNode, result: bool, moves_played: list):
         """
         Update statistics in all nodes from leaf to root.
@@ -591,11 +655,13 @@ class MCTSAgent(AgentBase):
 
             node = node.parent
 
+
     def get_next_player(self, node: RaveMCTSNode) -> Colour:
         if node.player is None:
             return self.colour
         else:
             return Colour.RED if node.player == Colour.BLUE else Colour.BLUE
+
 
     def check_immediate_win(self, board: Board, move: tuple[int, int]) -> bool:
         """Check if a move leads to immediate win"""
@@ -605,6 +671,7 @@ class MCTSAgent(AgentBase):
         test_board.set_tile_colour(move[0], move[1], self.colour)
         test_board.has_ended(self.colour)
         return test_board._winner == self.colour
+
 
     def make_move(self, turn: int, board: Board, opp_move: Move | None) -> Move:
         """
@@ -729,6 +796,7 @@ class MCTSAgent(AgentBase):
 
         return Move(-1, -1)  # Safe fallback if no valid moves found
 
+
     def _trace_path(self, board: Board, start: tuple[int, int], player: Colour, direction: str) -> list[tuple[int, int]]:
         """
         Trace a potential winning path from start position using A*.
@@ -749,12 +817,6 @@ class MCTSAgent(AgentBase):
         visited.add(start)
 
         target = board.size - 1
-
-        def distance_to_target(x, y):
-            if direction == 'vertical':
-                return target - x
-            else:
-                return target - y
             
         while open_list:
             f, (x, y), path = heapq.heappop(open_list)
@@ -771,9 +833,17 @@ class MCTSAgent(AgentBase):
                     if board.tiles[nx][ny].colour == player or board.tiles[nx][ny].colour is None:
                         visited.add((nx, ny))
                         g = len(path) # g(n) is the cost to reach this node, aka the path length
-                        h = distance_to_target(nx, ny) # h(n) is the estimated cost to target
+                        h = self.distance_to_target(nx, ny, target, direction) # h(n) is the estimated cost to target
                         f = g + h # f(n) = g(n) + h(n)
                         heapq.heappush(open_list, (f, (nx, ny), path + [(nx, ny)]))
 
         # No path found
         return []
+
+
+    def distance_to_target(self, x: int, y: int, target: int, direction: str) -> int:
+        """ This is used in _trace_path() to calculate the estimated cost to the target heuristic. """
+        if direction == 'vertical':
+            return target - x
+        else:
+            return target - y

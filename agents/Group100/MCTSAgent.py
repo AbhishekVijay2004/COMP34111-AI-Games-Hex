@@ -6,7 +6,6 @@ from src.Board import Board
 from src.Colour import Colour
 from src.Move import Move
 from copy import deepcopy
-import time
 
 class RaveMCTSNode:
     """
@@ -111,7 +110,6 @@ class MCTSAgent(AgentBase):
     """
     def __init__(self, colour: Colour):
         super().__init__(colour)
-        self.trace_path_time = 0
         self.simulations = 1000
         self.win_score = 10
         self.colour = colour
@@ -638,9 +636,6 @@ class MCTSAgent(AgentBase):
         - Memory management
         - Time control awareness
         """
-        start_time = time.time()
-        self.trace_path_time = 0
-
         # Update current board state
         self.validate_board_state(board)
 
@@ -664,10 +659,6 @@ class MCTSAgent(AgentBase):
             # - The opponent's move strength is greater than swap_strength_threshold.
             if is_center or distance_to_center <= swap_distance_threshold or opp_move_strength >= swap_strength_threshold:
                 # Decide to swap
-                end_time = time.time()
-                print(f"Time taken to trace path: {self.trace_path_time:.16f} seconds")
-                with open('a_star_speed.log', 'a+') as file:
-                    file.write(f"{turn},{self.trace_path_time:.16f}\n")
                 return Move(-1, -1)
 
         # First check for immediate winning moves
@@ -676,10 +667,6 @@ class MCTSAgent(AgentBase):
             valid_moves = [m for m in self.get_valid_moves(board) if self.is_valid_move(board, m)]
             for move in valid_moves:
                 if self.check_immediate_win(board, move):
-                    end_time = time.time()
-                    print(f"Time taken to trace path: {self.trace_path_time:.16f} seconds")
-                    with open('a_star_speed.log', 'a+') as file:
-                        file.write(f"{turn},{self.trace_path_time:.16f}\n")
                     return Move(move[0], move[1])
 
         root_node = RaveMCTSNode(board=deepcopy(board))
@@ -731,10 +718,6 @@ class MCTSAgent(AgentBase):
                 if test_board.tiles[best_move[0]][best_move[1]].colour == self.colour:
                     self.root = best_child
                     self.root.parent = None
-                    end_time = time.time()
-                    print(f"Time taken to trace path: {self.trace_path_time:.16f} seconds")
-                    with open('a_star_speed.log', 'a+') as file:
-                        file.write(f"{turn},{self.trace_path_time:.16f}\n")
                     return Move(best_move[0], best_move[1])
 
         # Safe fallback with explicit validation
@@ -742,21 +725,13 @@ class MCTSAgent(AgentBase):
         if valid_moves:
             move = choice(valid_moves)
             self.root = RaveMCTSNode()
-            end_time = time.time()
-            print(f"Time taken to trace path: {self.trace_path_time:.16f} seconds")
-            with open('a_star_speed.log', 'a+') as file:
-                file.write(f"{turn},{self.trace_path_time:.16f}\n")
             return Move(move[0], move[1])
 
-        end_time = time.time()
-        print(f"Time taken to trace path: {self.trace_path_time:.16f} seconds")
-        with open('a_star_speed.log', 'a+') as file:
-            file.write(f"{turn},{self.trace_path_time:.16f}\n")
         return Move(-1, -1)  # Safe fallback if no valid moves found
 
     def _trace_path(self, board: Board, start: tuple[int, int], player: Colour, direction: str) -> list[tuple[int, int]]:
         """
-        Trace a potential winning path from start position using BFS.
+        Trace a potential winning path from start position using A*.
         Returns shortest path if one exists, otherwise empty list.
         
         Args:
@@ -765,10 +740,8 @@ class MCTSAgent(AgentBase):
             player: Player color to trace for
             direction: 'vertical' for RED (top-bottom), 'horizontal' for BLUE (left-right)
         """
-        start_time = time.time()
-
         open_list = [] # Discovered, but not visited, nodes
-        # heapq is a min-heap priority queue (smallest value first - aka closest distance to target)
+        # heapq is a min-heap priority queue (smallest value first, aka closest distance to target)
         # This is used for the open_list
         heapq.heappush(open_list, (0, start, [start]))
 
@@ -789,8 +762,6 @@ class MCTSAgent(AgentBase):
             # Check winning condition
             if (direction == 'vertical' and x == target) or \
                (direction == 'horizontal' and y == target):
-                end_time = time.time()
-                self.trace_path_time += end_time - start_time
                 return path
             
             # Check all possible directions
@@ -805,6 +776,4 @@ class MCTSAgent(AgentBase):
                         heapq.heappush(open_list, (f, (nx, ny), path + [(nx, ny)]))
 
         # No path found
-        end_time = time.time()
-        self.trace_path_time += end_time - start_time
         return []

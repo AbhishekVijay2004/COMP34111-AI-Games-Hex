@@ -1,3 +1,4 @@
+import heapq
 from math import sqrt, log
 from random import choice, random, Random
 from src.AgentBase import AgentBase
@@ -110,6 +111,7 @@ class MCTSAgent(AgentBase):
     """
     def __init__(self, colour: Colour):
         super().__init__(colour)
+        self.trace_path_time = 0
         self.simulations = 1000
         self.win_score = 10
         self.colour = colour
@@ -637,6 +639,7 @@ class MCTSAgent(AgentBase):
         - Time control awareness
         """
         start_time = time.time()
+        self.trace_path_time = 0
 
         # Update current board state
         self.validate_board_state(board)
@@ -662,7 +665,9 @@ class MCTSAgent(AgentBase):
             if is_center or distance_to_center <= swap_distance_threshold or opp_move_strength >= swap_strength_threshold:
                 # Decide to swap
                 end_time = time.time()
-                print(f"Time taken to decide move: {end_time - start_time:.2f} seconds")
+                print(f"Time taken to trace path: {self.trace_path_time:.16f} seconds")
+                with open('a_star_speed.log', 'a+') as file:
+                    file.write(f"{turn},{self.trace_path_time:.16f}\n")
                 return Move(-1, -1)
 
         # First check for immediate winning moves
@@ -672,7 +677,9 @@ class MCTSAgent(AgentBase):
             for move in valid_moves:
                 if self.check_immediate_win(board, move):
                     end_time = time.time()
-                    print(f"Time taken to decide move: {end_time - start_time:.2f} seconds")
+                    print(f"Time taken to trace path: {self.trace_path_time:.16f} seconds")
+                    with open('a_star_speed.log', 'a+') as file:
+                        file.write(f"{turn},{self.trace_path_time:.16f}\n")
                     return Move(move[0], move[1])
 
         root_node = RaveMCTSNode(board=deepcopy(board))
@@ -725,7 +732,9 @@ class MCTSAgent(AgentBase):
                     self.root = best_child
                     self.root.parent = None
                     end_time = time.time()
-                    print(f"Time taken to decide move: {end_time - start_time:.2f} seconds")
+                    print(f"Time taken to trace path: {self.trace_path_time:.16f} seconds")
+                    with open('a_star_speed.log', 'a+') as file:
+                        file.write(f"{turn},{self.trace_path_time:.16f}\n")
                     return Move(best_move[0], best_move[1])
 
         # Safe fallback with explicit validation
@@ -734,11 +743,15 @@ class MCTSAgent(AgentBase):
             move = choice(valid_moves)
             self.root = RaveMCTSNode()
             end_time = time.time()
-            print(f"Time taken to decide move: {end_time - start_time:.2f} seconds")
+            print(f"Time taken to trace path: {self.trace_path_time:.16f} seconds")
+            with open('a_star_speed.log', 'a+') as file:
+                file.write(f"{turn},{self.trace_path_time:.16f}\n")
             return Move(move[0], move[1])
 
         end_time = time.time()
-        print(f"Time taken to decide move: {end_time - start_time:.2f} seconds")
+        print(f"Time taken to trace path: {self.trace_path_time:.16f} seconds")
+        with open('a_star_speed.log', 'a+') as file:
+            file.write(f"{turn},{self.trace_path_time:.16f}\n")
         return Move(-1, -1)  # Safe fallback if no valid moves found
 
     def _trace_path(self, board: Board, start: tuple[int, int], player: Colour, direction: str) -> list[tuple[int, int]]:
@@ -752,26 +765,46 @@ class MCTSAgent(AgentBase):
             player: Player color to trace for
             direction: 'vertical' for RED (top-bottom), 'horizontal' for BLUE (left-right)
         """
-        queue = [(start, [start])]
-        visited = {start}
+        start_time = time.time()
+
+        open_list = [] # Discovered, but not visited, nodes
+        # heapq is a min-heap priority queue (smallest value first - aka closest distance to target)
+        # This is used for the open_list
+        heapq.heappush(open_list, (0, start, [start]))
+
+        visited = set() # Visited nodes
+        visited.add(start)
+
         target = board.size - 1
-        
-        while queue:
-            (x, y), path = queue.pop(0)
+
+        def distance_to_target(x, y):
+            if direction == 'vertical':
+                return target - x
+            else:
+                return target - y
             
+        while open_list:
+            f, (x, y), path = heapq.heappop(open_list)
+
             # Check winning condition
             if (direction == 'vertical' and x == target) or \
                (direction == 'horizontal' and y == target):
+                end_time = time.time()
+                self.trace_path_time += end_time - start_time
                 return path
             
             # Check all possible directions
             for dx, dy in [(0,1), (1,0), (1,-1), (0,-1), (-1,0), (-1,1)]:
                 nx, ny = x + dx, y + dy
-                if ((0 <= nx < board.size) and (0 <= ny < board.size) and 
-                    (nx, ny) not in visited and 
-                    (board.tiles[nx][ny].colour == player or 
-                     board.tiles[nx][ny].colour is None)):
-                    visited.add((nx, ny))
-                    queue.append(((nx, ny), path + [(nx, ny)]))
-        
-        return []  # No path found
+                if (0 <= nx < board.size) and (0 <= ny < board.size) and (nx, ny) not in visited: 
+                    if board.tiles[nx][ny].colour == player or board.tiles[nx][ny].colour is None:
+                        visited.add((nx, ny))
+                        g = len(path) # g(n) is the cost to reach this node, aka the path length
+                        h = distance_to_target(nx, ny) # h(n) is the estimated cost to target
+                        f = g + h # f(n) = g(n) + h(n)
+                        heapq.heappush(open_list, (f, (nx, ny), path + [(nx, ny)]))
+
+        # No path found
+        end_time = time.time()
+        self.trace_path_time += end_time - start_time
+        return []

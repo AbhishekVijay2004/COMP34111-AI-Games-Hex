@@ -30,18 +30,14 @@ class RaveMCTSNode:
         return self.move_amaf_wins.get(move, 0) / visits
 
     def ucb1(self, explore: float = 1.41, rave_const: float = 300) -> float:
-        """
-        Calculate node selection value combining MCTS and RAVE scores.
-        """
         if self.visits == 0:
             return float('inf')
 
         beta = sqrt(rave_const / (3 * self.visits + rave_const))
-        mcts_value = self.wins / self.visits + explore * sqrt(log(self.parent.visits) / self.visits)
-
-        # Use move-specific AMAF value
+        U = self.wins / self.visits  # Exploitation term
+        E = explore * sqrt(log(self.parent.visits) / self.visits)  # Exploration term
+        mcts_value = U + E  # Include exploration inside the MCTS term
         amaf_value = self.get_amaf_value(self.move) if self.move else 0.0
-
         return (1 - beta) * mcts_value + beta * amaf_value
 
     def update_amaf_stats(self, move: tuple[int, int], won: bool):

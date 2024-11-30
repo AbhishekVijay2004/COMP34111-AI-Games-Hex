@@ -83,6 +83,8 @@ class RaveAgent(AgentBase):
         self.critical_paths = {}  # Cache for critical path analysis
         self.opponent_bridges = {}  # Cache for opponent bridge positions
         self.defensive_scores = {}  # Cache for defensive position scores
+        self.win_sequence_depth = 2  # Configurable depth for win sequence detection
+        self.min_moves_for_sequence_check = 15  # Only check sequences after this many moves
 
     def switch_player(self, current_player: Colour) -> Colour:
         """Switch the current player"""
@@ -341,6 +343,61 @@ class RaveAgent(AgentBase):
         board.set_tile_colour(move[0], move[1], None)  # Undo the move
         return won
 
+    def find_winning_sequence(self, board: Board, player: Colour, depth: int, path=None) -> list[tuple[int, int]] | None:
+        """
+        Look for a sequence of moves that leads to a guaranteed win.
+        Returns the winning sequence if found, None otherwise.
+        """
+        if path is None:
+            path = []
+        
+        if len(path) == depth:
+            return None
+            
+        if board.has_ended(player):
+            return path
+            
+        valid_moves = self.get_smart_moves(board)
+        
+        for move in valid_moves:
+            if not self.is_valid_move(board, move):
+                continue
+                
+            # Try move
+            board.set_tile_colour(move[0], move[1], player)
+            new_path = path + [move]
+            
+            # Check if this leads to a win
+            if board.has_ended(player):
+                board.set_tile_colour(move[0], move[1], None)
+                return new_path
+                
+            # Recursively check opponent's responses
+            opponent = Colour.opposite(player)
+            can_opponent_prevent_win = False
+            
+            for opp_move in self.get_smart_moves(board):
+                if not self.is_valid_move(board, opp_move):
+                    continue
+                    
+                board.set_tile_colour(opp_move[0], opp_move[1], opponent)
+                
+                # Recursively search for our winning continuation
+                sequence = self.find_winning_sequence(board, player, depth, new_path)
+                
+                board.set_tile_colour(opp_move[0], opp_move[1], None)
+                
+                if sequence is None:
+                    can_opponent_prevent_win = True
+                    break
+            
+            board.set_tile_colour(move[0], move[1], None)
+            
+            if not can_opponent_prevent_win:
+                return new_path
+        
+        return None
+
     def make_move(self, turn: int, board: Board, opp_move: Move | None) -> Move:
         """
         Main decision function combining all MCTS+RAVE elements.
@@ -376,6 +433,23 @@ class RaveAgent(AgentBase):
         for move in valid_moves:
             if self.check_immediate_win(board, move, opponent):
                 return Move(move[0], move[1])
+
+        # Count total moves played
+        moves_played = sum(1 for i in range(board.size) 
+                         for j in range(board.size) 
+                         if board.tiles[i][j].colour is not None)
+
+        # Check for winning sequences in mid-late game
+        if moves_played >= self.min_moves_for_sequence_check:
+            # First check if we have a winning sequence
+            our_sequence = self.find_winning_sequence(board, self.colour, self.win_sequence_depth)
+            if our_sequence:
+                return Move(our_sequence[0][0], our_sequence[0][1])
+
+            # Then check if opponent has a winning sequence and block it
+            opp_sequence = self.find_winning_sequence(board, Colour.opposite(self.colour), self.win_sequence_depth)
+            if opp_sequence:
+                return Move(opp_sequence[0][0], opp_sequence[0][1])
 
         # Continue with MCTS if no immediate wins/blocks found
         root_node = RaveMCTSNode()

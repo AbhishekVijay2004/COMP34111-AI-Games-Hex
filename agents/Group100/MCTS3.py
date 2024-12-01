@@ -210,6 +210,74 @@ class RaveAgent(AgentBase):
 
         self.critical_paths[cache_key] = paths
         return paths
+    
+    def get_two_bridges_score(self, board: Board, move: tuple[int, int]) -> float:
+        """ 
+        Return a "two bridge" score that is calculated based on:
+            +1 for each two bridge created by making the given move. 
+            +0.5 for every opponent two bridge that is blocked by the given move.
+
+        The more two bridges, the better the move. The more opponent two 
+        bridges that are blocked, the better the move.
+
+        A move will have a higher score if it creates multiple two bridges.
+
+        This function assumes move is a valid move.
+        """
+
+        two_bridges_score = 0
+
+        # Creates a two bridge for current player
+        two_bridges_score += 4 * self.get_two_bridges(board, move, self.colour)
+
+        # Blocks opponent two bridges
+        # This is not worth as much as prioritising our own bridges
+        opponent = self.colour.opposite()
+        two_bridges_score += (self.get_two_bridges(board, move, opponent) * 3)
+
+        return two_bridges_score
+
+
+    def get_two_bridges(self, board: Board, move: tuple[int, int], colour: Colour):
+        """Returns the number of two bridges made by a given move for a given player."""
+        x, y = move
+        
+        # Define all possible two bridge patterns relative to move position
+        patterns = [
+            # Format: [(piece_x, piece_y), (empty1_x, empty1_y), (empty2_x, empty2_y)]
+            [(-1, -1), (-1, 0), (0, -1)],
+            [(1, -2), (0, -1), (1, -1)],
+            [(2, -1), (1, -1), (1, 0)],
+            [(1, 1), (1, 0), (0, 1)],
+            [(-1, 2), (0, 1), (-1, 1)],
+            [(-2, 1), (-1, 1), (-1, 0)]
+        ]
+        
+        count = 0
+        # Cache board size check
+        size = board.size
+        
+        # Pre-compute function results for the move position
+        def in_bounds(px, py):
+            return 0 <= px < size and 0 <= py < size
+        
+        for pattern in patterns:
+            piece, empty1, empty2 = pattern
+            px, py = x + piece[0], y + piece[1]
+            e1x, e1y = x + empty1[0], y + empty1[1]
+            e2x, e2y = x + empty2[0], y + empty2[1]
+            
+            # Single bounds check for all points
+            if not (in_bounds(px, py) and in_bounds(e1x, e1y) and in_bounds(e2x, e2y)):
+                continue
+                
+            # Check pattern match
+            if (board.tiles[px][py].colour is colour and
+                board.tiles[e1x][e1y].colour is None and
+                board.tiles[e2x][e2y].colour is None):
+                count += 1
+                
+        return count
 
     def evaluate_defensive_position(self, board: Board, move: tuple[int, int]) -> float:
         """Evaluate move's defensive value"""

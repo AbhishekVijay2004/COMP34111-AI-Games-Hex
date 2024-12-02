@@ -29,13 +29,16 @@ class RaveMCTSNode:
             return 0.0
         return self.move_amaf_wins.get(move, 0) / visits
 
-    def ucb1(self, explore: float = 1.41, rave_const: float = 300) -> float:
+    def ucb1(self, explore_constant, rave_constant) -> float:
+        """
+        Calculate node selection value using provided constants.
+        """
         if self.visits == 0:
             return float('inf')
 
-        beta = sqrt(rave_const / (3 * self.visits + rave_const))
+        beta = sqrt(rave_constant / (3 * self.visits + rave_constant))
         U = self.wins / self.visits  # Exploitation term
-        E = explore * sqrt(log(self.parent.visits) / self.visits)  # Exploration term
+        E = explore_constant * sqrt(log(self.parent.visits) / self.visits)  # Exploration term
         mcts_value = U + E  # Include exploration inside the MCTS term
         amaf_value = self.get_amaf_value(self.move) if self.move else 0.0
         return (1 - beta) * mcts_value + beta * amaf_value
@@ -55,6 +58,20 @@ class RaveAgent(AgentBase):
     """
     def __init__(self, colour: Colour):
         super().__init__(colour)
+        self.weights = {
+            'center_weight': 1.419,
+            'neighbor_weight': 0.729,
+            'bridge_weight': 0.568,
+            'edge_weight': 0.568,
+            'defensive_weight': 2.225,
+            'two_bridge_weight': 4.452,
+            'opponent_bridge_block': 3.226,
+            'explore_constant': 1.568,
+            'rave_constant': 322.542,
+            'early_stop_threshold': 0.95,
+            'min_visits_ratio': 0.142,
+            'progressive_widening_constant': 1.5,
+        }
         self.simulations = 1000
         self.win_score = 10  # Adjusted to 1 for win counts
         self.colour = colour
@@ -62,12 +79,12 @@ class RaveAgent(AgentBase):
         self._board_size = 11
         self._all_positions = [(i, j) for i in range(self._board_size) 
                                for j in range(self._board_size)]
-        self.rave_constant = 300  # Tune this value
+        self.rave_constant = self.weights['rave_constant']  # Tune this value
         self.move_history = []  # Track move history
         self.move_scores = {}  # Cache for move evaluations
         self.transposition_table = {}  # Cache for board states
-        self.early_stop_threshold = 0.95  # Higher threshold for early stopping
-        self.min_visits_ratio = 0.1  # Minimum visit ratio for early stopping
+        self.early_stop_threshold = self.weights['early_stop_threshold']  # Higher threshold for early stopping
+        self.min_visits_ratio = self.weights['min_visits_ratio']  # Minimum visit ratio for early stopping
         self._rng = Random(42)  # Create a dedicated random number generator
         self._zobrist_table = {
             (i, j, color): self._rng.getrandbits(64)
@@ -81,6 +98,8 @@ class RaveAgent(AgentBase):
         self.defensive_scores = {}  # Cache for defensive position scores
         self.win_sequence_depth = 2  # Configurable depth for win sequence detection
         self.min_moves_for_sequence_check = 15  # Only check sequences after this many moves
+        
+        
 
     def switch_player(self, current_player: Colour) -> Colour:
         """Switch the current player"""
@@ -111,6 +130,7 @@ class RaveAgent(AgentBase):
                 board.tiles[nx][ny].colour is None):
                 neighbors.append((nx, ny))
         return neighbors
+    
 
     def evaluate_move(self, board: Board, move: tuple[int, int]) -> float:
         """Enhanced move evaluation with defensive considerations"""
@@ -129,23 +149,27 @@ class RaveAgent(AgentBase):
         neighbors = self.get_neighbor_moves(board, x, y)
         friendly_neighbors = sum(1 for nx, ny in neighbors 
                                if board.tiles[nx][ny].colour == self.colour)
-        score += friendly_neighbors * 0.5
+        score += friendly_neighbors * self.weights['neighbor_weight']
         
         # Bridge formation potential
         bridge_score = sum(1 for nx, ny in neighbors 
                          if abs(nx-x) == 1 and abs(ny-y) == 1 
                          and board.tiles[nx][ny].colour == self.colour)
-        score += bridge_score * 0.3
+        score += bridge_score * self.weights['bridge_weight']
         
         # Edge control
         if self.colour == Colour.RED and (x == 0 or x == board.size-1):
-            score += 0.4
+            score += self.weights['edge_weight']
         elif self.colour == Colour.BLUE and (y == 0 or y == board.size-1):
-            score += 0.4
+            score += self.weights['edge_weight']
             
         # Add defensive score
         defensive_score = self.evaluate_defensive_position(board, move)
         score += defensive_score
+        
+        # Add two bridge score
+        two_bridge_score = self.get_two_bridges_score(board, move)
+        score += two_bridge_score
 
         self.move_scores[move] = score
         return score
@@ -228,12 +252,12 @@ class RaveAgent(AgentBase):
         two_bridges_score = 0
 
         # Creates a two bridge for current player
-        two_bridges_score += 4 * self.get_two_bridges(board, move, self.colour)
+        two_bridges_score += self.weights['two_bridge_weight'] * self.get_two_bridges(board, move, self.colour)
 
         # Blocks opponent two bridges
         # This is not worth as much as prioritising our own bridges
         opponent = self.colour.opposite()
-        two_bridges_score += (self.get_two_bridges(board, move, opponent) * 3)
+        two_bridges_score += (self.get_two_bridges(board, move, opponent) * self.weights['opponent_bridge_block'])
 
         return two_bridges_score
 
@@ -293,7 +317,7 @@ class RaveAgent(AgentBase):
         opp_paths = self.find_critical_paths(board, self.opposing_colour)
         for path in opp_paths:
             if move in path:
-                score += 2.0  # High priority for blocking critical paths
+                score += self.weights['defensive_weight']  # High priority for blocking critical paths
                 break
 
         self.defensive_scores[cache_key] = score
@@ -305,7 +329,10 @@ class RaveAgent(AgentBase):
         """
         played_moves = []
         while node.untried_moves == [] and node.children:
-            node = max(node.children, key=lambda n: n.ucb1())
+            node = max(node.children, key=lambda n: n.ucb1(
+                explore_constant=self.weights['explore_constant'],
+                rave_constant=self.weights['rave_constant']
+            ))
             move = node.move
             player = self.get_next_player(node.parent)
             board.set_tile_colour(move[0], move[1], player)
@@ -405,6 +432,8 @@ class RaveAgent(AgentBase):
         board.set_tile_colour(move[0], move[1], player)
         won = board.has_ended(player)
         board.set_tile_colour(move[0], move[1], None)  # Undo the move
+        if won:
+            print(f"Immediate win found for {player} at {move}")
         return won
 
     def find_winning_sequence(self, board: Board, player: Colour, depth: int, path=None) -> list[tuple[int, int]] | None:

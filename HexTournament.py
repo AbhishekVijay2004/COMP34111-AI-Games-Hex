@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 # set the timeout limit in seconds
-TIME_OUT_LIMIT = 1
+TIME_OUT_LIMIT = 600
 
 fieldnames = [
     "player1",
@@ -270,7 +270,8 @@ if __name__ == "__main__":
     for p in sorted(glob("agents/Group*/cmd.txt"), key=extract_group_number):
         with open(p, "r") as f:
             agent = f.read().split("\n")[0].strip()
-            if p.split('/')[1] != agent.split('.')[1]:
+            print(p, agent)
+            if p.split('\\')[1] != agent.split('.')[1]:
                 print(f"Agent location {agent} does not match group number for path {p}, agent will not be loaded.")
             else:
                 agents[extract_group_number(p)] = agent

@@ -155,7 +155,7 @@ class MCTSAgent(AgentBase):
 
             iterations += 1
 
-        print(f"MCTS Iterations: {iterations}, Time Spent: {time.time() - start_time:.2f}s")
+        # print(f"MCTS Iterations: {iterations}, Time Spent: {time.time() - start_time:.2f}s")
 
         # Return the move with the most visits (the 'best' one) because it has 
         # been selected the most after all the MCTS iterations.

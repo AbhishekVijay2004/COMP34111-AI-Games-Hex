@@ -1,1 +1,1 @@
-agents.Group2.CrashAgent CrashAgent
+agents.Group2.ValidNaiveAgent ValidNaiveAgent

@@ -1,1 +1,1 @@
-agents.Group1.CheatAgent CheatAgent
+agents.Group1.BasicMCTSAgent MCTSAgent

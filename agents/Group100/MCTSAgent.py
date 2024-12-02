@@ -209,7 +209,6 @@ class MCTSAgent(AgentBase):
         # Two bridge forming potential
         # If it forms a two bridge, this is a good move
         two_bridge_score = self.get_two_bridges_score(board, move)
-        print("Two bridges score:", two_bridge_score)
         score += two_bridge_score * 0.4
         
         # Edge control

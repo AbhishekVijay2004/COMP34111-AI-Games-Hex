@@ -1,5 +1,1 @@
 agents.Group100.MCTSAgent MCTSAgent
-agents.Group100.ValidNaiveAgent ValidNaiveAgent
-agents.Group100.MCTSAgentOptimised MCTSAgentOptimised
-agents.Group100.RaveAgent RaveAgent
-agents.Group100.MCTS3 RaveAgent

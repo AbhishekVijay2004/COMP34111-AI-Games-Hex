@@ -319,24 +319,30 @@ class RaveAgent(AgentBase):
         x, y = move
         
         # Define all possible two bridge patterns relative to move position
+        # These patterns define valid Hex two bridge formations
+        # Format: [(anchor_stone), (empty1), (empty2)]
+        # The patterns represent diamond shapes between stones
         patterns = [
-            # Format: [(piece_x, piece_y), (empty1_x, empty1_y), (empty2_x, empty2_y)]
-            [(-1, -1), (-1, 0), (0, -1)],
-            [(1, -2), (0, -1), (1, -1)],
+            # Top two bridge
+            [(-2, 0), (-1, 0), (-1, 1)],
+            # Top-right two bridge  
+            [(-1, 2), (-1, 1), (0, 1)],
+            # Bottom-right two bridge
+            [(1, 1), (0, 1), (1, 0)],
+            # Bottom two bridge
             [(2, -1), (1, -1), (1, 0)],
-            [(1, 1), (1, 0), (0, 1)],
-            [(-1, 2), (0, 1), (-1, 1)],
-            [(-2, 1), (-1, 1), (-1, 0)]
+            # Bottom-left two bridge
+            [(1, -2), (0, -1), (1, -1)],
+            # Top-left two bridge
+            [(-1, -1), (-1, 0), (0, -1)]
         ]
         
         count = 0
-        # Cache board size check
         size = board.size
         
-        # Pre-compute function results for the move position
         def in_bounds(px, py):
             return 0 <= px < size and 0 <= py < size
-        
+            
         for pattern in patterns:
             piece, empty1, empty2 = pattern
             px, py = x + piece[0], y + piece[1]
@@ -346,13 +352,18 @@ class RaveAgent(AgentBase):
             # Single bounds check for all points
             if not (in_bounds(px, py) and in_bounds(e1x, e1y) and in_bounds(e2x, e2y)):
                 continue
-                
-            # Check pattern match
-            if (board.tiles[px][py].colour is colour and
+            
+            # Check pattern match:
+            # - Anchor piece must be our color
+            # - Both bridge cells must be empty
+            # - The bridge cells must form a valid Hex connection
+            if (board.tiles[px][py].colour == colour and
                 board.tiles[e1x][e1y].colour is None and
-                board.tiles[e2x][e2y].colour is None):
+                board.tiles[e2x][e2y].colour is None and
+                # Ensure cells are adjacent in Hex grid
+                abs(e1x - e2x) + abs(e1y - e2y) == 1):
                 count += 1
-                
+                    
         return count
 
     def evaluate_defensive_position(self, board: Board, move: tuple[int, int]) -> float:

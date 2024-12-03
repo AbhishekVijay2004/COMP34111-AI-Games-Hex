@@ -208,6 +208,58 @@ class RaveAgent(AgentBase):
         # Sort regular moves by evaluation
         moves.sort(key=lambda m: self.evaluate_move(board, m), reverse=True)
         return moves
+    
+    def detect_bridges_under_attack(self, board: Board, opp_move: tuple[int, int]) -> list[tuple[int, int]]:
+        """
+        Detects bridges under attack by the opponent's move.
+        Returns a list of moves to save the bridges.
+        """
+        x, y = opp_move
+        size = board.size
+
+        # Define bridge patterns relative to opp_move
+        patterns = [
+            # Format: [(our_stone1_dx, our_stone1_dy), (other_empty_dx, other_empty_dy), (our_stone2_dx, our_stone2_dy)]
+            [(-1, -1), (-1, 0), (0, -1)],  # Pattern 1
+            [(0, -1), (1, -1), (1, -2)],   # Pattern 2
+            [(1, -1), (1, 0), (2, -1)],    # Pattern 3
+            [(1, 0), (0, 1), (1, 1)],      # Pattern 4
+            [(0, 1), (-1, 1), (-1, 2)],    # Pattern 5
+            [(-1, 1), (-1, 0), (-2, 1)],   # Pattern 6
+        ]
+
+        moves_to_save = []
+
+        for pattern in patterns:
+            s1_dx, s1_dy = pattern[0]
+            e_dx, e_dy = pattern[1]
+            s2_dx, s2_dy = pattern[2]
+
+            s1_x, s1_y = x + s1_dx, y + s1_dy
+            e_x, e_y = x + e_dx, y + e_dy
+            s2_x, s2_y = x + s2_dx, y + s2_dy
+
+            # Check if positions are within bounds
+            if not (0 <= s1_x < size and 0 <= s1_y < size):
+                continue
+            if not (0 <= e_x < size and 0 <= e_y < size):
+                continue
+            if not (0 <= s2_x < size and 0 <= s2_y < size):
+                continue
+
+            # Check if our stones are at s1 and s2
+            if (board.tiles[s1_x][s1_y].colour == self.colour and
+                board.tiles[s2_x][s2_y].colour == self.colour):
+
+                # Check if the other empty cell is unoccupied
+                if board.tiles[e_x][e_y].colour is None:
+
+                    # The bridge is under attack, we can save it by playing at (e_x, e_y)
+                    if self.is_valid_move(board, (e_x, e_y)):
+                        moves_to_save.append((e_x, e_y))
+
+        return moves_to_save
+
 
     def find_critical_paths(self, board: Board, player: Colour) -> list[list[tuple[int, int]]]:
         """Find potentially winning paths for a player"""
@@ -543,6 +595,14 @@ class RaveAgent(AgentBase):
             opp_sequence = self.find_winning_sequence(board, Colour.opposite(self.colour), self.win_sequence_depth)
             if opp_sequence:
                 return Move(opp_sequence[0][0], opp_sequence[0][1])
+        
+        if opp_move:
+            bridges_to_save = self.detect_bridges_under_attack(board, (opp_move.x, opp_move.y))
+            if bridges_to_save:
+                move_to_save = choice(bridges_to_save)
+                print(f"Saving bridge at {move_to_save}")
+                return Move(move_to_save[0], move_to_save[1])
+
 
         # Continue with MCTS if no immediate wins/blocks found
         root_node = RaveMCTSNode()

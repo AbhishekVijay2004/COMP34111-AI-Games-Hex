@@ -22,7 +22,7 @@ class RaveNode:
         self.pruned_moves = set()  # Store inferior moves
         self.virtual_connections = set()  # Store virtual connections
         self.heavy_node_processed = False  # Track if node has been analyzed
-        self.visit_threshold = 10  # Threshold for heavy node processing
+        self.visit_threshold = 500  # Threshold for heavy node processing
 
     def get_amaf_value(self, move):
         """Get the AMAF value for a move"""
@@ -61,7 +61,6 @@ class RaveNode:
 
     def is_heavy_node(self):
         """Check if node has enough visits to be considered heavy"""
-        print(self.visits, self.visit_threshold, self.heavy_node_processed)
         return self.visits >= self.visit_threshold and not self.heavy_node_processed
 
     def find_virtual_connections(self, board: Board):
@@ -263,6 +262,90 @@ class RaveNode:
                     return True
         return False
 
+    def _dominates(self, board: Board, move1: tuple[int, int], move2: tuple[int, int]) -> bool:
+        """Check if move1 dominates move2 strategically"""
+        x1, y1 = move1
+        x2, y2 = move2
+        
+        # Make move1 and check its strategic value
+        board.set_tile_colour(x1, y1, self.player)
+        value1 = self._evaluate_position(board, move1)
+        board.set_tile_colour(x1, y1, None)
+        
+        # Make move2 and check its strategic value
+        board.set_tile_colour(x2, y2, self.player)
+        value2 = self._evaluate_position(board, move2)
+        board.set_tile_colour(x2, y2, None)
+        
+        return value1 > value2
+
+    def _evaluate_position(self, board: Board, move: tuple[int, int]) -> float:
+        """Evaluate the strategic value of a position"""
+        x, y = move
+        value = 0.0
+        
+        # Check connectivity to edges
+        if self.player == Colour.RED:
+            # For red player, check vertical connections
+            if x == 0:  # Connected to top
+                value += 1.0
+            if x == board.size - 1:  # Connected to bottom
+                value += 1.0
+            # Bonus for center positions
+            value += 1.0 - abs(y - board.size/2) / board.size
+        else:
+            # For blue player, check horizontal connections
+            if y == 0:  # Connected to left
+                value += 1.0
+            if y == board.size - 1:  # Connected to right
+                value += 1.0
+            # Bonus for center positions
+            value += 1.0 - abs(x - board.size/2) / board.size
+        
+        # Check neighbor connections
+        for dx, dy in [(-1,0), (1,0), (0,-1), (0,1), (-1,1), (1,-1)]:
+            nx, ny = x + dx, y + dy
+            if self._is_valid_position(board, nx, ny):
+                if board.tiles[nx][ny].colour == self.player:
+                    value += 0.5
+                
+        # Check for bridge potential
+        bridge_score = self._count_potential_bridges(board, move)
+        value += bridge_score * 0.3
+        
+        return value
+
+    def _count_potential_bridges(self, board: Board, move: tuple[int, int]) -> int:
+        """Count number of potential bridges from this position"""
+        x, y = move
+        bridge_count = 0
+        
+        # Bridge patterns to check
+        bridge_patterns = [
+            [(-1,-1), (-1,0), (0,-1)],  # top-left bridge
+            [(1,-2), (0,-1), (1,-1)],   # top-right bridge
+            [(2,-1), (1,-1), (1,0)],    # right bridge
+            [(1,1), (1,0), (0,1)],      # bottom-right bridge
+            [(-1,2), (0,1), (-1,1)],    # bottom-left bridge
+            [(-2,1), (-1,1), (-1,0)]    # left bridge
+        ]
+        
+        for pattern in bridge_patterns:
+            endpoint, space1, space2 = pattern
+            ex, ey = x + endpoint[0], y + endpoint[1]
+            s1x, s1y = x + space1[0], y + space1[1]
+            s2x, s2y = x + space2[0], y + space2[1]
+            
+            if (self._is_valid_position(board, ex, ey) and 
+                self._is_valid_position(board, s1x, s1y) and 
+                self._is_valid_position(board, s2x, s2y)):
+                # Check if bridge formation is possible
+                if (board.tiles[s1x][s1y].colour is None and
+                    board.tiles[s2x][s2y].colour is None):
+                    bridge_count += 1
+        
+        return bridge_count
+
 class RaveBasicAgent(AgentBase):
     def __init__(self, colour: Colour):
         super().__init__(colour)
@@ -289,7 +372,12 @@ class RaveBasicAgent(AgentBase):
     def select_node(self, node, board):
         """Enhanced selection considering pruned moves"""
         played_moves = []
-        while node.untried_moves == [] and node.children:
+        if node.untried_moves is None:
+            node.untried_moves = [m for m in self.get_valid_moves(board) 
+                                if m not in node.pruned_moves]
+        
+        
+        while node.untried_moves or node.children:
             # Check if node is heavy and needs processing
             if node.is_heavy_node():
                 self._process_heavy_node(node, board)

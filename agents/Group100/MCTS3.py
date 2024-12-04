@@ -97,6 +97,8 @@ class RaveAgent(AgentBase):
         self.defensive_scores = {}  # Cache for defensive position scores
         self.win_sequence_depth = 2  # Configurable depth for win sequence detection
         self.min_moves_for_sequence_check = 15  # Only check sequences after this many moves
+        self.sorted_moves_cache = {}  # Cache for sorted moves
+        self.sorted_moves_cache_size = 1000  # Limit cache size
 
     def get_player_moves(self, current_player: Colour, move: tuple[int, int], 
                          red_moves: list, blue_moves: list) -> None:
@@ -170,7 +172,22 @@ class RaveAgent(AgentBase):
         return score
 
     def get_smart_moves(self, board: Board) -> list[tuple[int, int]]:
-        """Enhanced move generation with defensive awareness"""
+        """Enhanced move generation with defensive awareness using caching"""
+        board_hash = self.hash_board(board)
+        if board_hash in self.sorted_moves_cache:
+            return self.sorted_moves_cache[board_hash]
+            
+        moves = self._compute_sorted_moves(board)
+        
+        # Manage cache size
+        if len(self.sorted_moves_cache) >= self.sorted_moves_cache_size:
+            self.sorted_moves_cache.clear()  # Simple cleanup strategy
+        
+        self.sorted_moves_cache[board_hash] = moves
+        return moves
+        
+    def _compute_sorted_moves(self, board: Board) -> list[tuple[int, int]]:
+        """Compute sorted moves for a given board state"""
         occupied = [(i, j) for i, j in self._all_positions 
                    if board.tiles[i][j].colour is not None]
         
@@ -190,19 +207,17 @@ class RaveAgent(AgentBase):
         for path in opp_paths:
             critical_moves.update(m for m in path if board.tiles[m[0]][m[1]].colour is None)
         
-        # Prioritize critical defensive moves
+        # Sort all moves at once using move evaluation
         if critical_moves:
-            # Sort critical moves by evaluation
-            critical_list = list(critical_moves)
-            critical_list.sort(key=lambda m: self.evaluate_move(board, m), reverse=True)
-            # Add remaining moves
-            remaining = [m for m in moves if m not in critical_moves]
-            remaining.sort(key=lambda m: self.evaluate_move(board, m), reverse=True)
+            critical_list = sorted(critical_moves, 
+                                 key=lambda m: self.evaluate_move(board, m), 
+                                 reverse=True)
+            remaining = sorted((m for m in moves if m not in critical_moves),
+                            key=lambda m: self.evaluate_move(board, m),
+                            reverse=True)
             return critical_list + remaining
         
-        # Sort regular moves by evaluation
-        moves.sort(key=lambda m: self.evaluate_move(board, m), reverse=True)
-        return moves
+        return sorted(moves, key=lambda m: self.evaluate_move(board, m), reverse=True)
     
     def detect_bridges_under_attack(self, board: Board, opp_move: tuple[int, int]) -> list[tuple[int, int]]:
         """

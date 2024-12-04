@@ -5,6 +5,7 @@ from src.Board import Board
 from src.Colour import Colour
 from src.Move import Move
 import heapq
+from copy import deepcopy
 class RaveMCTSNode:
     """
     Enhanced MCTS node implementing RAVE (Rapid Action Value Estimation).
@@ -59,18 +60,18 @@ class RaveAgent(AgentBase):
     def __init__(self, colour: Colour):
         super().__init__(colour)
         self.weights = {
-            'center_weight': 1.419,
-            'neighbor_weight': 0.729,
-            'bridge_weight': 0.568,
-            'edge_weight': 0.568,
-            'defensive_weight': 2.225,
-            'two_bridge_weight': 4.452,
-            'opponent_bridge_block': 3.226,
-            'explore_constant': 1.568,
-            'rave_constant': 322.542,
-            'early_stop_threshold': 0.95,
-            'min_visits_ratio': 0.142,
-            'progressive_widening_constant': 1.5,
+            'center_weight': 1.403,
+            'neighbor_weight': 0.943,
+            'bridge_weight': 0.943,
+            'edge_weight': 0.943,
+            'defensive_weight': 6.420,
+            'two_bridge_weight': 6.421,
+            'opponent_bridge_block': 6.418,
+            'explore_constant': 2.005,
+            'rave_constant': 340.901,
+            'early_stop_threshold': 0.934,
+            'min_visits_ratio': 0.140,
+            'swap_strength_threshold': 0.741,
         }
         self.simulations = 1000
         self.win_score = 10  # Adjusted to 1 for win counts
@@ -80,9 +81,7 @@ class RaveAgent(AgentBase):
         self._all_positions = [(i, j) for i in range(self._board_size) 
                                for j in range(self._board_size)]
         self.rave_constant = self.weights['rave_constant']  # Tune this value
-        self.move_history = []  # Track move history
         self.move_scores = {}  # Cache for move evaluations
-        self.transposition_table = {}  # Cache for board states
         self.early_stop_threshold = self.weights['early_stop_threshold']  # Higher threshold for early stopping
         self.min_visits_ratio = self.weights['min_visits_ratio']  # Minimum visit ratio for early stopping
         self._rng = Random(42)  # Create a dedicated random number generator
@@ -171,6 +170,10 @@ class RaveAgent(AgentBase):
         two_bridge_score = self.get_two_bridges_score(board, move)
         score += two_bridge_score
 
+        # Add virtual connection score
+        virtual_connection_score = self.evaluate_virtual_connections(board, move, self.colour)
+        score += virtual_connection_score
+
         self.move_scores[move] = score
         return score
 
@@ -211,55 +214,49 @@ class RaveAgent(AgentBase):
     
     def detect_bridges_under_attack(self, board: Board, opp_move: tuple[int, int]) -> list[tuple[int, int]]:
         """
-        Detects bridges under attack by the opponent's move.
-        Returns a list of moves to save the bridges.
+        Detects bridges under attack by comparing two bridge positions before and after opponent's move.
+        Returns a list of moves to save the threatened bridges.
         """
-        x, y = opp_move
-        size = board.size
-
-        # Define bridge patterns relative to opp_move
-        patterns = [
-            # Format: [(our_stone1_dx, our_stone1_dy), (other_empty_dx, other_empty_dy), (our_stone2_dx, our_stone2_dy)]
-            [(-1, -1), (-1, 0), (0, -1)],  # Pattern 1
-            [(0, -1), (1, -1), (1, -2)],   # Pattern 2
-            [(1, -1), (1, 0), (2, -1)],    # Pattern 3
-            [(1, 0), (0, 1), (1, 1)],      # Pattern 4
-            [(0, 1), (-1, 1), (-1, 2)],    # Pattern 5
-            [(-1, 1), (-1, 0), (-2, 1)],   # Pattern 6
-        ]
-
-        moves_to_save = []
-
-        for pattern in patterns:
-            s1_dx, s1_dy = pattern[0]
-            e_dx, e_dy = pattern[1]
-            s2_dx, s2_dy = pattern[2]
-
-            s1_x, s1_y = x + s1_dx, y + s1_dy
-            e_x, e_y = x + e_dx, y + e_dy
-            s2_x, s2_y = x + s2_dx, y + s2_dy
-
-            # Check if positions are within bounds
-            if not (0 <= s1_x < size and 0 <= s1_y < size):
-                continue
-            if not (0 <= e_x < size and 0 <= e_y < size):
-                continue
-            if not (0 <= s2_x < size and 0 <= s2_y < size):
-                continue
-
-            # Check if our stones are at s1 and s2
-            if (board.tiles[s1_x][s1_y].colour == self.colour and
-                board.tiles[s2_x][s2_y].colour == self.colour):
-
-                # Check if the other empty cell is unoccupied
-                if board.tiles[e_x][e_y].colour is None:
-
-                    # The bridge is under attack, we can save it by playing at (e_x, e_y)
-                    if self.is_valid_move(board, (e_x, e_y)):
-                        moves_to_save.append((e_x, e_y))
-
-        return moves_to_save
-
+        x, y = opp_move[0], opp_move[1]
+        moves_to_save = set()
+        
+        # Store original state and get current two bridges
+        original_color = board.tiles[x][y].colour
+        current_two_bridges = set()
+        
+        # Get all current two bridge positions
+        for pos in [(i, j) for i in range(board.size) for j in range(board.size)]:
+            if board.tiles[pos[0]][pos[1]].colour == self.colour:
+                bridges = self.get_two_bridge_positions(board, pos, self.colour)
+                for anchor, bridge_cells in bridges:
+                    # Store as frozen set to make it hashable
+                    current_two_bridges.add(frozenset(bridge_cells))
+        
+        # Temporarily undo opponent's move
+        board.set_tile_colour(x, y, None)
+        
+        # Get all two bridge positions before opponent's move
+        previous_two_bridges = set()
+        for pos in [(i, j) for i in range(board.size) for j in range(board.size)]:
+            if board.tiles[pos[0]][pos[1]].colour == self.colour:
+                bridges = self.get_two_bridge_positions(board, pos, self.colour)
+                for anchor, bridge_cells in bridges:
+                    previous_two_bridges.add(frozenset(bridge_cells))
+        
+        # Restore board state
+        board.set_tile_colour(x, y, original_color)
+        
+        # Find threatened bridges (bridges that existed before but not after opponent's move)
+        threatened_bridges = previous_two_bridges - current_two_bridges
+        
+        # For each threatened bridge, add the empty cell that could save it
+        for bridge_cells in threatened_bridges:
+            for cell in bridge_cells:
+                # If the cell isn't where opponent just played and it's empty
+                if cell != opp_move and board.tiles[cell[0]][cell[1]].colour is None :
+                    moves_to_save.add(cell)
+        
+        return list(set(moves_to_save))
 
     def find_critical_paths(self, board: Board, player: Colour) -> list[list[tuple[int, int]]]:
         """Find potentially winning paths for a player"""
@@ -314,57 +311,70 @@ class RaveAgent(AgentBase):
         return two_bridges_score
 
 
-    def get_two_bridges(self, board: Board, move: tuple[int, int], colour: Colour):
-        """Returns the number of two bridges made by a given move for a given player."""
+    def get_two_bridge_positions(self, board: Board, move: tuple[int, int], colour: Colour) -> list[tuple[tuple[int, int], list[tuple[int, int]]]]:
+        """
+        Returns a list of two bridge positions, each containing:
+        - The anchor stone position
+        - List of the two empty cells that form the bridge path
+        """
         x, y = move
         
-        # Define all possible two bridge patterns relative to move position
-        # These patterns define valid Hex two bridge formations
-        # Format: [(anchor_stone), (empty1), (empty2)]
-        # The patterns represent diamond shapes between stones
+        # Update patterns to include all valid Hex two bridge formations including diagonal bridges
         patterns = [
-            # Top two bridge
-            [(-2, 0), (-1, 0), (-1, 1)],
-            # Top-right two bridge  
-            [(-1, 2), (-1, 1), (0, 1)],
-            # Bottom-right two bridge
-            [(1, 1), (0, 1), (1, 0)],
-            # Bottom two bridge
-            [(2, -1), (1, -1), (1, 0)],
-            # Bottom-left two bridge
-            [(1, -2), (0, -1), (1, -1)],
-            # Top-left two bridge
-            [(-1, -1), (-1, 0), (0, -1)]
+            # Original patterns
+            [(-2, 0), (-1, 0), (-1, 1)],     # Top
+            [(-1, 2), (-1, 1), (0, 1)],      # Top-right
+            [(1, 1), (0, 1), (1, 0)],        # Bottom-right
+            [(2, -1), (1, -1), (1, 0)],      # Bottom
+            [(1, -2), (0, -1), (1, -1)],     # Bottom-left
+            [(-1, -1), (-1, 0), (0, -1)],    # Top-left
+            
+            # Additional diagonal patterns
+            [(2, 0), (1, 0), (1, 1)],        # Vertical down
+            [(0, 2), (0, 1), (1, 1)],        # Horizontal right
+            [(0, -2), (0, -1), (1, -1)],     # Horizontal left
+            [(-2, 2), (-1, 1), (-1, 2)],     # Diagonal top-right
+            [(2, -2), (1, -1), (2, -1)],     # Diagonal bottom-left
         ]
         
-        count = 0
+        bridges = []
         size = board.size
         
         def in_bounds(px, py):
             return 0 <= px < size and 0 <= py < size
-            
+        
+        def is_valid_two_bridge(px, py, e1x, e1y, e2x, e2y):
+            # Check that empty cells are adjacent
+            if abs(e1x - e2x) + abs(e1y - e2y) != 1:
+                return False
+            # Check that empty cells are adjacent to respective stones
+            if (abs(px - e1x) + abs(py - e1y) != 1) or (abs(x - e2x) + abs(y - e2y) != 1):
+                return False
+            return True
+                
         for pattern in patterns:
             piece, empty1, empty2 = pattern
             px, py = x + piece[0], y + piece[1]
             e1x, e1y = x + empty1[0], y + empty1[1]
             e2x, e2y = x + empty2[0], y + empty2[1]
             
-            # Single bounds check for all points
             if not (in_bounds(px, py) and in_bounds(e1x, e1y) and in_bounds(e2x, e2y)):
                 continue
-            
-            # Check pattern match:
-            # - Anchor piece must be our color
-            # - Both bridge cells must be empty
-            # - The bridge cells must form a valid Hex connection
+                
             if (board.tiles[px][py].colour == colour and
                 board.tiles[e1x][e1y].colour is None and
                 board.tiles[e2x][e2y].colour is None and
-                # Ensure cells are adjacent in Hex grid
-                abs(e1x - e2x) + abs(e1y - e2y) == 1):
-                count += 1
+                is_valid_two_bridge(px, py, e1x, e1y, e2x, e2y)):
+                
+                bridges.append(
+                    ((px, py), [(e1x, e1y), (e2x, e2y)])
+                )
                     
-        return count
+        return bridges
+
+    def get_two_bridges(self, board: Board, move: tuple[int, int], colour: Colour):
+        """Returns the number of two bridges made by a given move for a given player."""
+        return len(self.get_two_bridge_positions(board, move, colour))
 
     def evaluate_defensive_position(self, board: Board, move: tuple[int, int]) -> float:
         """Evaluate move's defensive value"""
@@ -386,11 +396,8 @@ class RaveAgent(AgentBase):
         self.defensive_scores[cache_key] = score
         return score
 
-    def select_node(self, node: RaveMCTSNode, board: Board) -> tuple:
-        """
-        Select most promising node to explore using UCB1 with RAVE.
-        """
-        played_moves = []
+    def select_node(self, node: RaveMCTSNode, board: Board) -> RaveMCTSNode:
+        """Select most promising node to explore using UCB1 with RAVE."""
         while node.untried_moves == [] and node.children:
             node = max(node.children, key=lambda n: n.ucb1(
                 explore_constant=self.weights['explore_constant'],
@@ -399,8 +406,7 @@ class RaveAgent(AgentBase):
             move = node.move
             player = self.get_next_player(node.parent)
             board.set_tile_colour(move[0], move[1], player)
-            played_moves.append((move, player))
-        return node, played_moves
+        return node
 
     def is_valid_move(self, board: Board, move: tuple[int, int]) -> bool:
         """Enhanced move validation"""
@@ -435,11 +441,8 @@ class RaveAgent(AgentBase):
         return hash_value
 
     def simulate(self, board: Board) -> tuple:
-        """
-        Run a game simulation from current position to estimate position value.
-        """
-        moves_made = []
-        current_player = self.colour  # Start with agent's color
+        """Run a game simulation from current position to estimate position value."""
+        current_player = self.colour
         red_moves = []
         blue_moves = []
 
@@ -457,14 +460,7 @@ class RaveAgent(AgentBase):
             move = moves[0] if random() < 0.8 else choice(moves)
             board.set_tile_colour(move[0], move[1], current_player)
             self.get_player_moves(current_player, move, red_moves, blue_moves)
-            moves_made.append((move, current_player))
-
-            # Switch player
-            current_player = self.switch_player(current_player)
-
-        # Undo moves
-        for move, player in reversed(moves_made):
-            board.set_tile_colour(move[0], move[1], None)
+            current_player = Colour.opposite(current_player)
 
         return result, red_moves, blue_moves
 
@@ -495,8 +491,6 @@ class RaveAgent(AgentBase):
         board.set_tile_colour(move[0], move[1], player)
         won = board.has_ended(player)
         board.set_tile_colour(move[0], move[1], None)  # Undo the move
-        if won:
-            print(f"Immediate win found for {player} at {move}")
         return won
 
     def find_winning_sequence(self, board: Board, player: Colour, depth: int, path=None) -> list[tuple[int, int]] | None:
@@ -541,6 +535,7 @@ class RaveAgent(AgentBase):
                 # Recursively search for our winning continuation
                 sequence = self.find_winning_sequence(board, player, depth, new_path)
                 
+                # Fix: Use opp_move coordinates when undoing opponent's move
                 board.set_tile_colour(opp_move[0], opp_move[1], None)
                 
                 if sequence is None:
@@ -554,10 +549,171 @@ class RaveAgent(AgentBase):
         
         return None
 
+    def _trace_path(self, board: Board, start: tuple[int, int], player: Colour, direction: str) -> list[tuple[int, int]]:
+        """
+        Trace a potential winning path from start position using A*.
+        Returns shortest path if one exists, otherwise empty list.
+        
+        Args:
+            board: Current game board
+            start: Starting position (x,y)
+            player: Player color to trace for
+            direction: 'vertical' for RED (top-bottom), 'horizontal' for BLUE (left-right)
+        """
+        open_list = [] # Discovered, but not visited, nodes
+        # heapq is a min-heap priority queue (smallest value first, aka closest distance to target)
+        # This is used for the open_list
+        heapq.heappush(open_list, (0, start, [start]))
+
+        visited = set() # Visited nodes
+        visited.add(start)
+
+        target = board.size - 1
+            
+        while open_list:
+            f, (x, y), path = heapq.heappop(open_list)
+
+            # Check winning condition
+            if (direction == 'vertical' and x == target) or \
+               (direction == 'horizontal' and y == target):
+                return path
+            
+            # Check all possible directions
+            for dx, dy in [(0,1), (1,0), (1,-1), (0,-1), (-1,0), (-1,1)]:
+                nx, ny = x + dx, y + dy
+                if (0 <= nx < board.size) and (0 <= ny < board.size) and (nx, ny) not in visited: 
+                    if board.tiles[nx][ny].colour == player or board.tiles[nx][ny].colour is None:
+                        visited.add((nx, ny))
+                        g = len(path) # g(n) is the cost to reach this node, aka the path length
+                        h = self.distance_to_target(nx, ny, target, direction) # h(n) is the estimated cost to target
+                        f = g + h # f(n) = g(n) + h(n)
+                        heapq.heappush(open_list, (f, (nx, ny), path + [(nx, ny)]))
+
+        # No path found
+        return []
+
+
+    def distance_to_target(self, x: int, y: int, target: int, direction: str) -> int:
+        """ This is used in _trace_path() to calculate the estimated cost to the target heuristic. """
+        if direction == 'vertical':
+            return target - x
+        else:
+            return target - y
+
+    def detect_virtual_connections(self, board: Board, colour: Colour) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+        """Returns list of virtual connections between pairs of stones."""
+        connections = []
+        stones = [(i, j) for i in range(board.size) 
+                 for j in range(board.size) 
+                 if board.tiles[i][j].colour == colour]
+        
+        for stone1 in stones:
+            for stone2 in stones:
+                if stone1 != stone2:
+                    if self._is_carrier_bridge(board, stone1, stone2, colour) or \
+                       self._is_bridge_bridge(board, stone1, stone2, colour) or \
+                       self._is_bridge_loop(board, stone1, stone2, colour):
+                        connections.append((stone1, stone2))
+        return connections
+
+    def _is_carrier_bridge(self, board: Board, stone1: tuple[int, int], stone2: tuple[int, int], colour: Colour) -> bool:
+        """Detect carrier-bridge pattern (two stones connected by two empty cells)."""
+        x1, y1 = stone1
+        x2, y2 = stone2
+        
+        # Check if stones are 2 cells apart
+        if abs(x1 - x2) + abs(y1 - y2) != 2:
+            return False
+            
+        # Find the two empty cells that could form the bridge
+        connecting_cells = []
+        for dx, dy in [(0,1), (1,0), (1,-1), (0,-1), (-1,0), (-1,1)]:
+            nx, ny = x1 + dx, y1 + dy
+            if (0 <= nx < board.size and 0 <= ny < board.size and 
+                board.tiles[nx][ny].colour is None):
+                if abs(nx - x2) + abs(ny - y2) == 1:  # Adjacent to stone2
+                    connecting_cells.append((nx, ny))
+                    
+        return len(connecting_cells) >= 2
+
+    def _is_bridge_bridge(self, board: Board, stone1: tuple[int, int], stone2: tuple[int, int], colour: Colour) -> bool:
+        """Detect bridge-bridge pattern (two bridges sharing a common empty cell)."""
+        x1, y1 = stone1
+        x2, y2 = stone2
+        
+        # Get potential bridge positions for both stones
+        bridges1 = self.get_two_bridge_positions(board, stone1, colour)
+        bridges2 = self.get_two_bridge_positions(board, stone2, colour)
+        
+        # Check if any bridges share an empty cell
+        for _, cells1 in bridges1:
+            for _, cells2 in bridges2:
+                if set(cells1) & set(cells2):  # If bridges share a cell
+                    return True
+        return False
+
+    def _is_bridge_loop(self, board: Board, stone1: tuple[int, int], stone2: tuple[int, int], colour: Colour) -> bool:
+        """Detect bridge-loop pattern (circular connection pattern)."""
+        x1, y1 = stone1
+        x2, y2 = stone2
+        
+        # Get all empty neighbors of both stones
+        neighbors1 = set(self.get_neighbor_moves(board, x1, y1))
+        neighbors2 = set(self.get_neighbor_moves(board, x2, y2))
+        
+        # Check if there are two distinct paths between the stones
+        common_neighbors = neighbors1 & neighbors2
+        if len(common_neighbors) >= 2:
+            return True
+            
+        return False
+
+    def evaluate_virtual_connections(self, board: Board, move: tuple[int, int], colour: Colour) -> float:
+        """Score a move based on virtual connections it creates or blocks."""
+        temp_board = self.copy_board(board)
+        score = 0
+        
+        # Make the move on copied board
+        temp_board.set_tile_colour(move[0], move[1], colour)
+        
+        # Count virtual connections after the move
+        connections_after = len(self.detect_virtual_connections(temp_board, colour))
+        
+        # Count opponent's virtual connections
+        opp_colour = Colour.opposite(colour)
+        opp_connections_after = len(self.detect_virtual_connections(temp_board, opp_colour))
+        
+        # No need to undo move since we used a copied board
+        score = connections_after - (0.5 * opp_connections_after)
+        
+        return score
+
+    def copy_board(self, board: Board) -> Board:
+        """Create an efficient copy of the board state."""
+        new_board = Board(board.size)
+        for i in range(board.size):
+            for j in range(board.size):
+                new_board.tiles[i][j].colour = board.tiles[i][j].colour
+        return new_board
+
     def make_move(self, turn: int, board: Board, opp_move: Move | None) -> Move:
         """
         Main decision function combining all MCTS+RAVE elements.
         """
+        # Print current board's two bridges for agent's color only
+        # valid_positions = [(i, j) for i in range(board.size) for j in range(board.size)]
+        # found_bridges = False
+        # for pos in valid_positions:
+        #     if board.tiles[pos[0]][pos[1]].colour == self.colour:  # Only check agent's pieces
+        #         two_bridges = self.get_two_bridge_positions(board, pos, self.colour)
+        #         if two_bridges:
+        #             found_bridges = True
+        #             print(f"Found two bridges from {pos}:")
+        #             for anchor, bridge_cells in two_bridges:
+        #                 print(f"  - Connected to {anchor} via empty cells {bridge_cells}")
+        # if not found_bridges:
+        #     pass
+
         # Strategic Swap Evaluation
         if turn == 2 and opp_move is not None:
             opp_x, opp_y = opp_move.x, opp_move.y
@@ -570,7 +726,7 @@ class RaveAgent(AgentBase):
 
             # Thresholds for swapping
             swap_distance_threshold = board.size // 4
-            swap_strength_threshold = 0.7  # Adjust based on testing
+            swap_strength_threshold = self.weights['swap_strength_threshold']  # Adjust based on testing
 
             if is_center or distance_to_center <= swap_distance_threshold or opp_move_strength >= swap_strength_threshold:
                 # Decide to swap
@@ -580,7 +736,7 @@ class RaveAgent(AgentBase):
         valid_moves = [m for m in self.get_valid_moves(board) if self.is_valid_move(board, m)]
         
         # Check our winning moves first
-        for move in valid_moves:
+        for move in valid_moves:      
             if self.check_immediate_win(board, move, self.colour):
                 return Move(move[0], move[1])
         
@@ -589,6 +745,12 @@ class RaveAgent(AgentBase):
         for move in valid_moves:
             if self.check_immediate_win(board, move, opponent):
                 return Move(move[0], move[1])
+            
+        if opp_move:
+            bridges_to_save = self.detect_bridges_under_attack(board, (opp_move.x, opp_move.y))
+            if bridges_to_save:
+                move_to_save = choice(bridges_to_save)
+                return Move(move_to_save[0], move_to_save[1])
 
         # Count total moves played
         moves_played = sum(1 for i in range(board.size) 
@@ -606,14 +768,6 @@ class RaveAgent(AgentBase):
             opp_sequence = self.find_winning_sequence(board, Colour.opposite(self.colour), self.win_sequence_depth)
             if opp_sequence:
                 return Move(opp_sequence[0][0], opp_sequence[0][1])
-        
-        if opp_move:
-            bridges_to_save = self.detect_bridges_under_attack(board, (opp_move.x, opp_move.y))
-            if bridges_to_save:
-                move_to_save = choice(bridges_to_save)
-                print(f"Saving bridge at {move_to_save}")
-                return Move(move_to_save[0], move_to_save[1])
-
 
         # Continue with MCTS if no immediate wins/blocks found
         root_node = RaveMCTSNode()
@@ -621,27 +775,20 @@ class RaveAgent(AgentBase):
 
         for i in range(self.simulations):
             node = root_node
-            temp_board = board
+            temp_board = self.copy_board(board)  # Use custom copy method here
 
             # Selection
-            played_moves = []
-            node, selection_moves = self.select_node(node, temp_board)
-            played_moves.extend(selection_moves)
+            node = self.select_node(node, temp_board)
 
             # Expansion
             node = self.expand(node, temp_board)
             if node.move:
                 temp_board.set_tile_colour(node.move[0], node.move[1], node.player)
-                played_moves.append((node.move, node.player))
 
-            # Simulation and backpropagation with correct move lists
+            # Simulation and backpropagation
             outcome, red_moves, blue_moves = self.simulate(temp_board)
             moves_for_backprop = red_moves if self.colour == Colour.RED else blue_moves
             self.backpropagate(node, outcome, moves_for_backprop)
-
-            # Undo moves
-            for move, player in reversed(played_moves):
-                temp_board.set_tile_colour(move[0], move[1], None)
 
             # Early stopping criteria
             if i > 100:
@@ -718,3 +865,91 @@ class RaveAgent(AgentBase):
             return target - x
         else:
             return target - y
+
+    def detect_virtual_connections(self, board: Board, colour: Colour) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+        """Returns list of virtual connections between pairs of stones."""
+        connections = []
+        stones = [(i, j) for i in range(board.size) 
+                 for j in range(board.size) 
+                 if board.tiles[i][j].colour == colour]
+        
+        for stone1 in stones:
+            for stone2 in stones:
+                if stone1 != stone2:
+                    if self._is_carrier_bridge(board, stone1, stone2, colour) or \
+                       self._is_bridge_bridge(board, stone1, stone2, colour) or \
+                       self._is_bridge_loop(board, stone1, stone2, colour):
+                        connections.append((stone1, stone2))
+        return connections
+
+    def _is_carrier_bridge(self, board: Board, stone1: tuple[int, int], stone2: tuple[int, int], colour: Colour) -> bool:
+        """Detect carrier-bridge pattern (two stones connected by two empty cells)."""
+        x1, y1 = stone1
+        x2, y2 = stone2
+        
+        # Check if stones are 2 cells apart
+        if abs(x1 - x2) + abs(y1 - y2) != 2:
+            return False
+            
+        # Find the two empty cells that could form the bridge
+        connecting_cells = []
+        for dx, dy in [(0,1), (1,0), (1,-1), (0,-1), (-1,0), (-1,1)]:
+            nx, ny = x1 + dx, y1 + dy
+            if (0 <= nx < board.size and 0 <= ny < board.size and 
+                board.tiles[nx][ny].colour is None):
+                if abs(nx - x2) + abs(ny - y2) == 1:  # Adjacent to stone2
+                    connecting_cells.append((nx, ny))
+                    
+        return len(connecting_cells) >= 2
+
+    def _is_bridge_bridge(self, board: Board, stone1: tuple[int, int], stone2: tuple[int, int], colour: Colour) -> bool:
+        """Detect bridge-bridge pattern (two bridges sharing a common empty cell)."""
+        x1, y1 = stone1
+        x2, y2 = stone2
+        
+        # Get potential bridge positions for both stones
+        bridges1 = self.get_two_bridge_positions(board, stone1, colour)
+        bridges2 = self.get_two_bridge_positions(board, stone2, colour)
+        
+        # Check if any bridges share an empty cell
+        for _, cells1 in bridges1:
+            for _, cells2 in bridges2:
+                if set(cells1) & set(cells2):  # If bridges share a cell
+                    return True
+        return False
+
+    def _is_bridge_loop(self, board: Board, stone1: tuple[int, int], stone2: tuple[int, int], colour: Colour) -> bool:
+        """Detect bridge-loop pattern (circular connection pattern)."""
+        x1, y1 = stone1
+        x2, y2 = stone2
+        
+        # Get all empty neighbors of both stones
+        neighbors1 = set(self.get_neighbor_moves(board, x1, y1))
+        neighbors2 = set(self.get_neighbor_moves(board, x2, y2))
+        
+        # Check if there are two distinct paths between the stones
+        common_neighbors = neighbors1 & neighbors2
+        if len(common_neighbors) >= 2:
+            return True
+            
+        return False
+
+    def evaluate_virtual_connections(self, board: Board, move: tuple[int, int], colour: Colour) -> float:
+        """Score a move based on virtual connections it creates or blocks."""
+        temp_board = self.copy_board(board)
+        score = 0
+        
+        # Make the move on copied board
+        temp_board.set_tile_colour(move[0], move[1], colour)
+        
+        # Count virtual connections after the move
+        connections_after = len(self.detect_virtual_connections(temp_board, colour))
+        
+        # Count opponent's virtual connections
+        opp_colour = Colour.opposite(colour)
+        opp_connections_after = len(self.detect_virtual_connections(temp_board, opp_colour))
+        
+        # No need to undo move since we used a copied board
+        score = connections_after - (0.5 * opp_connections_after)
+        
+        return score

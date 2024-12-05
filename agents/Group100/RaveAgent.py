@@ -106,7 +106,14 @@ class MCTSAgent(AgentBase):
 
         return valid_moves
     
-    
+    def check_immediate_win(self, board: Board, move: tuple[int, int], player: Colour) -> bool:
+        """Check if a move leads to immediate win for specified player"""
+        if not self.is_valid_move(board, move):
+            return False
+        board.set_tile_colour(move[0], move[1], player)
+        won = board.has_ended(player)
+        board.set_tile_colour(move[0], move[1], None)  # Undo the move
+        return won
 
     def get_all_positions_for_colour(self, board: Board, colour: Colour) -> list[Move]:
         """ Get all nodes that are placed down, of that colour, in the current game state. """
@@ -160,6 +167,19 @@ class MCTSAgent(AgentBase):
         # If opponent plays center on their first move
         if turn == 2 and board.tiles[board.size // 2][board.size // 2].colour is not None:
             return Move(-1, -1)  # Swap if center is taken
+        
+        valid_moves = self.get_possible_moves(board)
+        
+        # Check for immediate win
+        for move in valid_moves:
+            if self.check_immediate_win(board, (move.x, move.y), self._colour):
+                return Move(move.x, move.y)
+        
+        # Check for immediate loss and block
+        for move in valid_moves:
+            if self.check_immediate_win(board, (move.x, move.y), Colour.opposite(self._colour)):
+                return Move(move.x, move.y)
+            
         
         root = MCTSNode(board)
             
@@ -246,11 +266,13 @@ class MCTSAgent(AgentBase):
             if current_hash not in self.transposition_table and len(self.transposition_table) < 1000000:  # Limit cache size
                 self.transposition_table[current_hash] = simulation_board._winner == self.colour
             
+            # Clear cache if it reaches the limit
             if len(self.transposition_table) == 1000000:
                 self.transposition_table.clear()
             
             simulation_colour = Colour.opposite(simulation_colour)
         
+        print(f"Simulation Winner: {simulation_board.print_board()}")
         result = simulation_board._winner == self.colour
         self.transposition_table[current_hash] = result
         return result

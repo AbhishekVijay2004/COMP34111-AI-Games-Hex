@@ -259,17 +259,23 @@ class MCTSAgent(AgentBase):
         if node.unexplored_children:
             # Get all possible two-bridge moves for current board state
             two_bridge_moves = self.get_possible_two_bridges(node.board, self.colour)
-             
-            # Create weights list: 3.0 for two-bridge moves, 1.0 for regular moves
-            weights = []
-            for move in node.unexplored_children:
-                if any(bridge.x == move.x and bridge.y == move.y for bridge in two_bridge_moves):
-                    weights.append(4.0)  # Higher weight for two-bridge moves
-                else:
-                    weights.append(1.0)  # Normal weight for regular moves
-                    
-            # Use weighted random choice instead of regular random choice
-            move = random.choices(node.unexplored_children, weights=weights)[0]
+                
+            # If there are two-bridge moves, prioritize them
+            if two_bridge_moves:
+                # Create weights list: 4.0 for two-bridge moves, 1.0 for regular moves
+                weights = []
+                for move in node.unexplored_children:
+                    if any(bridge.x == move.x and bridge.y == move.y for bridge in two_bridge_moves):
+                        weights.append(4.0)  # Higher weight for two-bridge moves
+                    else:
+                        weights.append(1.0)  # Normal weight for regular moves
+                        
+                # Use weighted random choice
+                move = random.choices(node.unexplored_children, weights=weights)[0]
+            else:
+                # If no two-bridge moves, just pick randomly
+                move = random.choice(node.unexplored_children)
+                
             node.unexplored_children.remove(move)
             
             # Create new board and child node
@@ -278,8 +284,9 @@ class MCTSAgent(AgentBase):
             child.board_hash = self.hash_board(new_board)
             
             # Set two-bridge property
-            child.creates_two_bridge = any(bridge.x == move.x and bridge.y == move.y 
-                                         for bridge in two_bridge_moves)
+            child.creates_two_bridge = any(two_bridge_moves) and any(
+                bridge.x == move.x and bridge.y == move.y for bridge in two_bridge_moves
+            )
             
             node.children.append(child)
             return child
@@ -298,11 +305,9 @@ class MCTSAgent(AgentBase):
         simulation_colour = self._colour
         current_hash = self.hash_board(simulation_board)
 
-        # bridges = self.get_possible_two_bridges(simulation_board, simulation_colour)
         moves = self.get_possible_moves(simulation_board)
         
         while not simulation_board.has_ended(Colour.RED) and not simulation_board.has_ended(Colour.BLUE):
-            # if not bridges:
             if not moves:
                 break
                 
@@ -310,11 +315,6 @@ class MCTSAgent(AgentBase):
             simulation_board.set_tile_colour(random_move.x, random_move.y, simulation_colour)
             current_hash = self.hash_update(current_hash, random_move.x, random_move.y, simulation_colour)
             moves.remove(random_move)
-            # else:
-            #     random_bridge_move = random.choice(bridges)
-            #     simulation_board.set_tile_colour(random_bridge_move.x, random_bridge_move.y, simulation_colour)
-            #     current_hash = self.hash_update(current_hash, random_bridge_move.x, random_bridge_move.y, simulation_colour)
-            #     bridges.remove(random_bridge_move)
             
             # Cache intermediate positions
             if current_hash not in self.transposition_table and len(self.transposition_table) < 1000000:  # Limit cache size

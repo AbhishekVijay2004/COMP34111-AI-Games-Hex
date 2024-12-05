@@ -106,13 +106,19 @@ class MCTSAgent(AgentBase):
 
         return valid_moves
     
-    def check_immediate_win(self, board: Board, move: tuple[int, int], player: Colour) -> bool:
+    def check_immediate_win(self, board: Board, move: Move | tuple[int, int], player: Colour) -> bool:
         """Check if a move leads to immediate win for specified player"""
-        if not self.is_valid_move(board, move):
+        if isinstance(move, Move):
+            x, y = move.x, move.y
+        else:
+            x, y = move
+
+        if not self.is_valid_move(board, (x, y)):
             return False
-        board.set_tile_colour(move[0], move[1], player)
+            
+        board.set_tile_colour(x, y, player)
         won = board.has_ended(player)
-        board.set_tile_colour(move[0], move[1], None)  # Undo the move
+        board.set_tile_colour(x, y, None)  # Undo the move
         return won
 
     def get_all_positions_for_colour(self, board: Board, colour: Colour) -> list[Move]:
@@ -130,15 +136,25 @@ class MCTSAgent(AgentBase):
     def copy_board(self, board: Board) -> Board:
         """Create an efficient copy of the board state."""
         new_board = Board(board.size)
+        new_board._winner = board._winner
+        
+        # Bulk copy colors in one step per row using list comprehension
+        # This is faster than individual tile access
         for i in range(board.size):
+            row = board.tiles[i]
             for j in range(board.size):
-                new_board.tiles[i][j].colour = board.tiles[i][j].colour
+                new_board.tiles[i][j].colour = row[j].colour
+                
         return new_board
     
 
-    def is_valid_move(self, board: Board, move: Move) -> bool:
+    def is_valid_move(self, board: Board, move: Move | tuple[int, int]) -> bool:
         """ Checks if a move is within the board boundaries and does not contain a colour. """
-        return 0 <= move.x < board.size and 0 <= move.y < board.size and board.tiles[move.x][move.y].colour is None
+        if isinstance(move, tuple):
+            x, y = move
+        else:
+            x, y = move.x, move.y
+        return 0 <= x < board.size and 0 <= y < board.size and board.tiles[x][y].colour is None
     
 
     def make_move(self, turn: int, board: Board, opp_move: Move | None) -> Move:
@@ -173,12 +189,12 @@ class MCTSAgent(AgentBase):
         # Check for immediate win
         for move in valid_moves:
             if self.check_immediate_win(board, (move.x, move.y), self._colour):
-                return Move(move.x, move.y)
+                return move
         
         # Check for immediate loss and block
         for move in valid_moves:
             if self.check_immediate_win(board, (move.x, move.y), Colour.opposite(self._colour)):
-                return Move(move.x, move.y)
+                return move
             
         
         root = MCTSNode(board)
@@ -272,7 +288,6 @@ class MCTSAgent(AgentBase):
             
             simulation_colour = Colour.opposite(simulation_colour)
         
-        print(f"Simulation Winner: {simulation_board.print_board()}")
         result = simulation_board._winner == self.colour
         self.transposition_table[current_hash] = result
         return result

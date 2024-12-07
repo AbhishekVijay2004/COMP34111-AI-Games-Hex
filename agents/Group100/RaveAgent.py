@@ -1,5 +1,4 @@
 from math import log, sqrt
-import copy
 import random
 import time
 
@@ -7,7 +6,6 @@ from src.AgentBase import AgentBase
 from src.Board import Board
 from src.Colour import Colour
 from src.Move import Move
-
 
 class MCTSNode:
     def __init__(self, board: Board, parent=None, move=None):
@@ -36,10 +34,19 @@ class MCTSNode:
             return float('inf')
         return ((self.wins / self.visits) +
                 c_param * sqrt((2 * log(self.parent.visits)) / self.visits))
+    
+    def copy_board(self, board: Board) -> Board:
+        """Create an efficient copy of the board state."""
+        new_board = Board(board.size)
+        new_board._winner = board._winner
+        for i in range(board.size):
+            for j in range(board.size):
+                new_board.tiles[i][j].colour = board.tiles[i][j].colour
+        return new_board
 
     def apply_move(self, move: Move, colour: Colour) -> Board:
         """ Apply a move to a copy of the board and return it. """
-        new_board = copy.deepcopy(self.board)
+        new_board = self.copy_board(self.board)
         new_board.tiles[move.x][move.y].colour = colour
         return new_board
 
@@ -108,7 +115,7 @@ class MCTSAgent(AgentBase):
 
     def make_move(self, turn: int, board: Board, opp_move: Move | None) -> Move:
         start_time = time.time()
-        max_time = 1.9
+        max_time = 4.9
 
         # Handle opponent swaps
         if opp_move and opp_move.x == -1 and opp_move.y == -1:
@@ -135,7 +142,7 @@ class MCTSAgent(AgentBase):
             save_move = self.save_two_bridge(board, opp_move)
             if save_move:
                 return random.choice(save_move)
-
+            
         root = MCTSNode(board)
 
         # MCTS
@@ -161,6 +168,7 @@ class MCTSAgent(AgentBase):
             two_bridge_moves = self.get_possible_two_bridges(node.board, self.colour)
 
             # If two-bridge moves exist, pick one of them first for speed
+            # TODO This is questionable, as it might not always be the best move, will need to evaluate.
             if two_bridge_moves:
                 # Filter out all two-bridge moves
                 candidate_moves = [m for m in node.unexplored_children if any(m.x == tb.x and m.y == tb.y for tb in two_bridge_moves)]

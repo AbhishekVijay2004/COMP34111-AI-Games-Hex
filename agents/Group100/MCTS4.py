@@ -65,7 +65,7 @@ class RaveAgent(AgentBase):
             'edge_weight': 0.568,
             'defensive_weight': 2.225,
             'two_bridge_weight': 4.452,
-            # 'ladder_weight': 6.0,
+            'chain_block_weight': 0.3,
             'opponent_bridge_block': 3.226,
             'explore_constant': 1.568,
             'rave_constant': 322.542,
@@ -172,9 +172,6 @@ class RaveAgent(AgentBase):
         two_bridge_score = self.get_two_bridges_score(board, move)
         score += two_bridge_score
         
-        # Check for ladder creation
-        if self.check_ladder(board, move, self.colour):
-            score += self.weights['ladder_weight']
 
         self.move_scores[move] = score
         return score
@@ -257,12 +254,130 @@ class RaveAgent(AgentBase):
                 score += self.weights['defensive_weight']  # High priority for blocking critical paths
                 break
 
-        # if self.opposing_colour == Colour.RED:
+        # TWO CHAIN BLOCKING
+        # If the opponent is moving vertically
+        if self.opposing_colour == Colour.RED:
+            # Checking the [x+1, y-2] tile for chains going up
+            # This is because blocking a chain starting from [x+1, y-2] is the most effective using the move [x, y]
+            if y-2 >= 0 and x+1 < board.size() and board.tiles[x+1][y-2].colour == self.opposing_colour:
+                chain_size, end = self.detect_chain(board, (x+1, y-2), self.opposing_colour, 'bottom-top')
+                # Give a higher score if the chain is longer 
+                score += chain_size * self.weights['chain_block_weight'] * self.weights['defensive_weight'] 
+                
+            # Checking the [x-1, y+2] tile for chains going down
+            elif y+2 < board.size() and x-1 >= 0 and board.tiles[x-1][y+2].colour == self.opposing_colour:
+                chain_size, end = self.detect_chain(board, (x-1, y+2), self.opposing_colour, 'top-bottom')
+                score += chain_size * self.weights['chain_block_weight'] * self.weights['defensive_weight']
+
+        # If the opponent is moving horizontally
+        elif self.opposing_colour == Colour.BLUE:
+            # Checking the [x+2, y-1] tile for chains going left
+            if x+2 < board.size() and y-1 >= 0 and board.tiles[x+2][y-1].colour == self.opposing_colour:
+                chain_size, end = self.detect_chain(board, (x+2, y-1), self.opposing_colour, 'right-left')
+                score += chain_size * self.weights['chain_block_weight'] * self.weights['defensive_weight']
+                
+            # Checking the [x-2, y+1] tile for chains going right
+            elif x-2 >= 0 and y+1 < board.size() and board.tiles[x-2][y+1].colour == self.opposing_colour:
+                chain_size, end = self.detect_chain(board, (x-2, y+1), self.opposing_colour, 'left-right')
+                score += chain_size * self.weights['chain_block_weight'] * self.weights['defensive_weight']
 
 
         self.defensive_scores[cache_key] = score
         return score
+    
+    def detect_chain(self, board: Board, move: tuple[int, int], colour: Colour, direction):
+        """
+        Check if a chain_size chain exists starting from the given move and given direction.
+        Args:
+            board: Current game board
+            move: Move to check (x, y)
+            colour: Player color to check for
+            chain_size: Number of pieces in the chain
+            direction: top-bottom or bottom-top for red, left-right or right-left for blue
+        
+        Returns:
+            int: Size of the chain if it exists, 0 otherwise
+            tuple[int, int]: Ending position of the chain
+        """
+        x, y = move
 
+        # Returns 0 for invalid inputs
+        if direction not in ['top-bottom', 'bottom-top', 'left-right', 'right-left']:
+            return 0
+        if x < 0 or x >= board.size or y < 0 or y >= board.size:
+            return 0
+        if board.tiles[x][y].colour != colour:
+            return 0
+        
+        chain_size = 1 # Starts at 1 because the current move is already counted
+        
+        def is_in_board(x, y):
+            return 0 <= x < board.size and 0 <= y < board.size
+        
+        # If the colour is red, the chain is vertical
+        if colour == Colour.RED:
+            if direction == 'top-bottom':
+                # Loops while the next tile is in the board and is the same colour
+                while is_in_board(x-1, y+1) and is_in_board(x, y+1) and (board.tiles[x][y+1].colour == colour or board.tiles[x-1][y+1].colour == colour): 
+                    if board.tiles[x][y+1].colour == colour:
+                        chain_size += 1
+                        y += 1
+                    elif board.tiles[x-1][y+1].colour == colour:
+                        chain_size += 1
+                        x -= 1
+                        y += 1
+                    else:
+                        break
+                return chain_size, (x, y)
+            
+            elif direction == 'bottom-top':
+                while is_in_board(x+1, y-1) and is_in_board(x, y-1) and (board.tiles[x][y-1].colour == colour or board.tiles[x+1][y-1].colour == colour): 
+                    if board.tiles[x][y-1].colour == colour:
+                        chain_size += 1
+                        y -= 1
+                    elif board.tiles[x+1][y-1].colour == colour:
+                        chain_size += 1
+                        x += 1
+                        y -= 1
+                    else:
+                        break
+                return chain_size, (x, y)
+            
+            else:
+                return 0
+            
+        # If the colour is blue, the chain is horizontal
+        elif colour == Colour.BLUE:
+            if direction == 'left-right':
+                while is_in_board(x+1, y-1) and is_in_board(x+1, y) and (board.tiles[x+1][y].colour == colour or board.tiles[x+1][y-1].colour == colour):
+                    if board.tiles[x+1][y].colour == colour:
+                        chain_size += 1
+                        x += 1
+                    elif board.tiles[x+1][y-1].colour == colour:
+                        chain_size += 1
+                        x += 1
+                        y -= 1
+                    else:
+                        break
+                return chain_size, (x, y)
+            
+            elif direction == 'right-left':
+                while is_in_board(x-1, y+1) and is_in_board(x-1, y) and (board.tiles[x-1][y].colour == colour or board.tiles[x-1][y+1].colour == colour):
+                    if board.tiles[x-1][y].colour == colour:
+                        chain_size += 1
+                        x -= 1
+                    if board.tiles[x-1][y+1].colour == colour:
+                        chain_size += 1
+                        x -= 1
+                        y += 1
+                    else:
+                        break
+                return chain_size, (x, y)
+            
+            else:
+                return 0
+        return 0
+    
     def get_two_bridges_score(self, board: Board, move: tuple[int, int]) -> float:
         """ 
         Return a "two bridge" score that is calculated based on:
@@ -330,103 +445,6 @@ class RaveAgent(AgentBase):
                 count += 1
                 
         return count
-
-    def detect_ladder(self, board: Board, move: tuple[int, int], colour: Colour, direction) -> int:
-        """
-        Check if a ladder_size ladder exists starting from the given move and given direction.
-        Args:
-            board: Current game board
-            move: Move to check (x, y)
-            colour: Player color to check for
-            ladder_size: Number of pieces in the ladder
-            direction: top-bottom or bottom-top for red, left-right or right-left for blue
-        
-        Returns:
-            int: Size of the ladder if it exists, 0 otherwise
-        """
-        x, y = move
-
-        # Returns 0 for invalid inputs
-        if direction not in ['top-bottom', 'bottom-top', 'left-right', 'right-left']:
-            return 0
-        if x < 0 or x >= board.size or y < 0 or y >= board.size:
-            return 0
-        if board.tiles[x][y].colour != colour:
-            return 0
-        
-        ladder_size = 1 # Starts at 1 because the current move is already counted
-        
-        def is_in_board(x, y):
-            return 0 <= x < board.size and 0 <= y < board.size
-        
-        # If the colour is red, the ladder is vertical
-        if colour == Colour.RED:
-            if direction == 'top-bottom':
-                # Loops while the next tile is in the board and is the same colour
-                while is_in_board(x-1, y+1) and is_in_board(x, y+1) and (board.tiles[x][y+1].colour == colour or board.tiles[x-1][y+1].colour == colour): 
-                    if board.tiles[x][y+1].colour == colour:
-                        ladder_size += 1
-                        y += 1
-                    elif board.tiles[x-1][y+1].colour == colour:
-                        ladder_size += 1
-                        x -= 1
-                        y += 1
-                    else:
-                        break
-                
-                return ladder_size
-            
-            elif direction == 'bottom-top':
-                while is_in_board(x+1, y-1) and is_in_board(x, y-1) and (board.tiles[x][y-1].colour == colour or board.tiles[x+1][y-1].colour == colour): 
-                    if board.tiles[x][y-1].colour == colour:
-                        ladder_size += 1
-                        y -= 1
-                    elif board.tiles[x+1][y-1].colour == colour:
-                        ladder_size += 1
-                        x += 1
-                        y -= 1
-                    else:
-                        break
-                
-                return ladder_size
-            
-            else:
-                return 0
-            
-        # If the colour is blue, the ladder is horizontal
-        elif colour == Colour.BLUE:
-            if direction == 'left-right':
-                while is_in_board(x+1, y-1) and is_in_board(x+1, y) and (board.tiles[x+1][y].colour == colour or board.tiles[x+1][y-1].colour == colour):
-                    if board.tiles[x+1][y].colour == colour:
-                        ladder_size += 1
-                        x += 1
-                    elif board.tiles[x+1][y-1].colour == colour:
-                        ladder_size += 1
-                        x += 1
-                        y -= 1
-                    else:
-                        break
-
-                return ladder_size
-            
-            elif direction == 'right-left':
-                while is_in_board(x-1, y+1) and is_in_board(x-1, y) and (board.tiles[x-1][y].colour == colour or board.tiles[x-1][y+1].colour == colour):
-                    if board.tiles[x-1][y].colour == colour:
-                        ladder_size += 1
-                        x -= 1
-                    if board.tiles[x-1][y+1].colour == colour:
-                        ladder_size += 1
-                        x -= 1
-                        y += 1
-                    else:
-                        break
-
-                return ladder_size
-            
-            else:
-                return 0
-            
-        return 0
 
     def select_node(self, node: RaveMCTSNode, board: Board) -> tuple:
         """

@@ -1,8 +1,8 @@
 from src.Game import Game
 from src.Colour import Colour
 from src.Player import Player
-from agents.Group100.RaveAgent import MCTSAgent as RaveAgentOld
 from agents.Group100.RaveAgent import MCTSAgent as RaveAgent
+from agents.Group100.MCTS3 import RaveAgent as RaveAgentOld
 import random
 from concurrent.futures import ProcessPoolExecutor
 from collections import defaultdict

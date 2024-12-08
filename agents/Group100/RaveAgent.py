@@ -86,15 +86,30 @@ class MCTSAgent(AgentBase):
         self.transposition_table = {}
 
     def get_possible_moves(self, board: Board) -> list[Move]:
-        """Get all valid moves."""
+        """ Get all valid moves in the current board state. """
         valid_moves = []
         for x in range(board.size):
             for y in range(board.size):
                 if board.tiles[x][y].colour is None:
                     valid_moves.append(Move(x, y))
         return valid_moves
+    
+    def get_smart_moves(self, board: Board) -> list[Move]:
+        """
+        Return an ordered list of valid moves such that the first entry is the best move. 
+        
+        The list is sorted by the evaluation score of each move.
+        """
+        valid_moves = self.get_possible_moves(board)
 
-    def is_my_stone(self, board: Board, move: Move | tuple[int, int]) -> bool:
+        # Sort the moves by their evaluation score
+        smart_moves = sorted(valid_moves, 
+                                key=lambda move: self.evaluate_move(board, move, self._colour), 
+                                reverse=True)
+        
+        return smart_moves
+    
+    def is_my_tile(self, board: Board, move: Move | tuple[int, int]) -> bool:
         x, y = (move.x, move.y) if isinstance(move, Move) else move
         return (0 <= x < board.size and 0 <= y < board.size and
                 board.tiles[x][y].colour is self._colour)
@@ -130,31 +145,70 @@ class MCTSAgent(AgentBase):
         return (0 <= x < board.size and 0 <= y < board.size and
                 board.tiles[x][y].colour is None)
     
-    def evaluate_move(self, board: Board, move: tuple[int, int], colour: Colour) -> float:
+    def evaluate_move(self, board: Board, move: Move | tuple[int, int], colour: Colour) -> float:
         """ 
         Evaluates the quality of a given move for the specified player colour. 
         
         Returns a score where a higher score represents a better move.
         """
 
-        if move in self.move_scores:
-            return self.move_scores[move]
+        #if move in self.move_scores:
+        #    return self.move_scores[move]
         
         score = 0  # Initialize score
-        x, y = move
+        x, y = (move.x, move.y) if isinstance(move, Move) else move
         center = board.size // 2
         
         # Prioritise moves closer to the center
         dist_to_center = abs(x - center) + abs(y - center)
         score += (max(0, (board.size - dist_to_center)) / board.size) * self.weights['center_weight']
 
+        # Prioritise moves that make or block two bridges
+        two_bridge_score = self.get_two_bridges_score(board)
+        score += two_bridge_score
+
         self.move_scores[move] = score
-        print("Evaluate move score for " + str(colour) + ":", score)
         return score
+    
+    def should_we_swap(self, opp_move: Move) -> bool:
+        """ Returns True if we should swap, False otherwise. """
+
+        # A list of moves where it is better to swap than not to swap
+        # Taken from here: https://www.hexwiki.net/index.php/Swap_rule
+        swap_moves = []
+
+        # y-axis (2 to 8)
+        for x in range(2,9):
+            # The whole x-axis (0 to 10)
+            for y in range(11):
+                # Skip the corners
+                if not (x == 2 and y == 0) and not (x == 8 and y == 0) and not (x == 2 and y == 10) and not (x == 8 and y == 10):
+                    swap_moves.append(Move(x, y))
+        
+        # Hard coding the rest of the swap moves
+        swap_moves.append(Move(0,10))
+        swap_moves.append(Move(1,9))
+        swap_moves.append(Move(1,10))
+        swap_moves.append(Move(9,0))
+        swap_moves.append(Move(10,0))
+        swap_moves.append(Move(9,1))
+
+        # On turn 2 our agent should always be BLUE, no need to consider RED
+        if opp_move is not None and self._colour == Colour.BLUE:
+            if opp_move in swap_moves:
+                return True
+
+        return False
 
     def make_move(self, turn: int, board: Board, opp_move: Move | None) -> Move:
         start_time = time.time()
         max_time = 4.9  # Used to ensure the agent never times out
+
+        self.get_smart_moves(board)
+
+        # Strategic swap evaluation - should we swap?
+        if turn == 2 and self.should_we_swap(turn, opp_move):
+            return Move(-1, -1)
 
         valid_moves = self.get_possible_moves(board)
 
@@ -189,34 +243,6 @@ class MCTSAgent(AgentBase):
 
         best_child = max(root.children, key=lambda c: c.visits)
 
-
-        # Strategic Swap Evaluation - should we swap?
-        # A list of moves where it is better to swap than not to swap
-        # Taken from here: https://www.hexwiki.net/index.php/Swap_rule
-        swap_moves = []
-
-        # y-axis (2 to 8)
-        for x in range(2,9):
-            # The whole x-axis (0 to 10)
-            for y in range(11):
-                # Skip the corners
-                if not (x == 2 and y == 0) and not (x == 8 and y == 0) and not (x == 2 and y == 10) and not (x == 8 and y == 10):
-                    swap_moves.append(Move(x, y))
-        
-        # Hard coding the rest of the swap moves
-        swap_moves.append(Move(0,10))
-        swap_moves.append(Move(1,9))
-        swap_moves.append(Move(1,10))
-        swap_moves.append(Move(9,0))
-        swap_moves.append(Move(10,0))
-        swap_moves.append(Move(9,1))
-
-        # On turn 2 our agent should always be BLUE, no need to consider RED
-        if turn == 2 and opp_move is not None and self._colour == Colour.BLUE:
-            if opp_move in swap_moves:
-                return Move(-1, -1)
-
-        # If no swap,
         return Move(best_child.move.x, best_child.move.y)
 
     def select_node(self, current_node: MCTSNode) -> MCTSNode:
@@ -226,8 +252,9 @@ class MCTSAgent(AgentBase):
 
     def expand_node(self, node: MCTSNode) -> MCTSNode:
         if node.unexplored_children:
-            two_bridge_moves = self.get_possible_two_bridges(node.board, self.colour)
-
+            two_bridges = self.get_two_bridges(node.board, self._colour)
+            two_bridge_moves = [move for move, _ in two_bridges]  # Get the two-bridge moves
+            
             # If two-bridge moves exist, pick one of them first for speed
             # TODO This is questionable, as it might not always be the best move, will need to evaluate.
             if two_bridge_moves:
@@ -241,7 +268,7 @@ class MCTSAgent(AgentBase):
                 move = random.choice(node.unexplored_children)
 
             node.unexplored_children.remove(move)
-            new_board = node.apply_move(move, self.colour)
+            new_board = node.apply_move(move, self._colour)
             child = MCTSNode(new_board, node, move)
             child.board_hash = self.hash_board(new_board)
             child.creates_two_bridge = any((move.x == tb.x and move.y == tb.y) for tb in two_bridge_moves)
@@ -250,27 +277,27 @@ class MCTSAgent(AgentBase):
         return node
 
     def simulate(self, state: Board) -> bool:
-        """Run a quick random simulation to the end from the given state."""
+        """ Run a quick random simulation to the end from the given state. """
         # Check transposition table
         current_hash = self.hash_board(state)
-        if current_hash in self.transposition_table:
-            return self.transposition_table[current_hash]
+        #if current_hash in self.transposition_table:
+        #    return self.transposition_table[current_hash]
 
         # Simulate on a copy
         simulation_board = self.copy_board(state)
         simulation_colour = self._colour
-        moves = self.get_possible_moves(simulation_board)
+        moves = self.get_smart_moves(simulation_board)
 
         # Fast random simulation without intermediate hashing
         while not simulation_board.has_ended(Colour.RED) and not simulation_board.has_ended(Colour.BLUE):
             if not moves:
                 break
-            move = random.choice(moves)
+            move = moves[0]  # The first move in get_smart_moves is the best move
             simulation_board.set_tile_colour(move.x, move.y, simulation_colour)
             moves.remove(move)
             simulation_colour = Colour.opposite(simulation_colour)
 
-        result = (simulation_board._winner == self.colour)
+        result = (simulation_board._winner == self._colour)
         self.transposition_table[current_hash] = result
         return result
 
@@ -293,117 +320,102 @@ class MCTSAgent(AgentBase):
                 node.wins += 1
             node = node.parent
 
-    def get_possible_two_bridges(self, board: Board, colour: Colour) -> list[Move]:
-        """ Get all possible two-bridge moves. """
-        two_bridges = []
-        current_nodes = self.get_all_positions_for_colour(board, colour)
+    def get_two_bridges(self, board: Board, colour: Colour) -> list[tuple[Move, tuple[Move, Move]]]:
+        """
+        Returns a list of two bridges that can be created by the given colour.
 
-        # Using the same patterns as before
-        if not current_nodes:
-            return two_bridges
-
-        for node in current_nodes:
-            # Pattern 1: Top-left bridge
-            if (self.is_valid_move(board, (node.x - 1, node.y - 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y)) and
-                self.is_valid_move(board, (node.x, node.y - 1))):
-                two_bridges.append(Move(node.x - 1, node.y - 1))
-
-            # Pattern 2: Top-right bridge
-            if (self.is_valid_move(board, (node.x + 1, node.y - 2)) and
-                self.is_valid_move(board, (node.x, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y - 1))):
-                two_bridges.append(Move(node.x + 1, node.y - 2))
-
-            # Pattern 3: Right bridge
-            if (self.is_valid_move(board, (node.x + 2, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y))):
-                two_bridges.append(Move(node.x + 2, node.y - 1))
-
-            # Pattern 4: Bottom-right bridge
-            if (self.is_valid_move(board, (node.x + 1, node.y + 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y)) and
-                self.is_valid_move(board, (node.x, node.y + 1))):
-                two_bridges.append(Move(node.x + 1, node.y + 1))
-
-            # Pattern 5: Bottom-left bridge
-            if (self.is_valid_move(board, (node.x - 1, node.y + 2)) and
-                self.is_valid_move(board, (node.x, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y + 1))):
-                two_bridges.append(Move(node.x - 1, node.y + 2))
-
-            # Pattern 6: Left bridge
-            if (self.is_valid_move(board, (node.x - 2, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y))):
-                two_bridges.append(Move(node.x - 2, node.y + 1))
-
-        return two_bridges
-
-    def get_two_bridges_with_positions(self, board: Board, colour: Colour) -> list[tuple[Move, tuple[Move, Move]]]:
+        Returns the move needed to make the two bridge and the two empty cells that will be created in the form of:
+            [(move_position, (empty_cell1, empty_cell2)), ...]
+        """
         two_bridges = []
         current_nodes = self.get_all_positions_for_colour(board, colour)
 
         for node in current_nodes:
             # Pattern 1: Top-left bridge
-            if (self.is_my_stone(board, (node.x - 1, node.y - 1)) and
+            if (self.is_my_tile(board, (node.x - 1, node.y - 1)) and
                 self.is_valid_move(board, (node.x - 1, node.y)) and
                 self.is_valid_move(board, (node.x, node.y - 1))):
-                two_bridges.append(((node.x - 1, node.y - 1),
+                two_bridges.append((Move(node.x - 1, node.y - 1),
                                     (Move(node.x - 1, node.y), Move(node.x, node.y - 1))))
 
             # Pattern 2: Top-right bridge
-            if (self.is_my_stone(board, (node.x + 1, node.y - 2)) and
+            if (self.is_my_tile(board, (node.x + 1, node.y - 2)) and
                 self.is_valid_move(board, (node.x, node.y - 1)) and
                 self.is_valid_move(board, (node.x + 1, node.y - 1))):
-                two_bridges.append(((node.x + 1, node.y - 2),
+                two_bridges.append((Move(node.x + 1, node.y - 2),
                                     (Move(node.x, node.y - 1), Move(node.x + 1, node.y - 1))))
 
             # Pattern 3: Right bridge
-            if (self.is_my_stone(board, (node.x + 2, node.y - 1)) and
+            if (self.is_my_tile(board, (node.x + 2, node.y - 1)) and
                 self.is_valid_move(board, (node.x + 1, node.y - 1)) and
                 self.is_valid_move(board, (node.x + 1, node.y))):
-                two_bridges.append(((node.x + 2, node.y - 1),
+                two_bridges.append((Move(node.x + 2, node.y - 1),
                                     (Move(node.x + 1, node.y - 1), Move(node.x + 1, node.y))))
 
             # Pattern 4: Bottom-right bridge
-            if (self.is_my_stone(board, (node.x + 1, node.y + 1)) and
+            if (self.is_my_tile(board, (node.x + 1, node.y + 1)) and
                 self.is_valid_move(board, (node.x + 1, node.y)) and
                 self.is_valid_move(board, (node.x, node.y + 1))):
-                two_bridges.append(((node.x + 1, node.y + 1),
+                two_bridges.append((Move(node.x + 1, node.y + 1),
                                     (Move(node.x + 1, node.y), Move(node.x, node.y + 1))))
 
             # Pattern 5: Bottom-left bridge
-            if (self.is_my_stone(board, (node.x - 1, node.y + 2)) and
+            if (self.is_my_tile(board, (node.x - 1, node.y + 2)) and
                 self.is_valid_move(board, (node.x, node.y + 1)) and
                 self.is_valid_move(board, (node.x - 1, node.y + 1))):
-                two_bridges.append(((node.x - 1, node.y + 2),
+                two_bridges.append((Move(node.x - 1, node.y + 2),
                                     (Move(node.x, node.y + 1), Move(node.x - 1, node.y + 1))))
 
             # Pattern 6: Left bridge
-            if (self.is_my_stone(board, (node.x - 2, node.y + 1)) and
+            if (self.is_my_tile(board, (node.x - 2, node.y + 1)) and
                 self.is_valid_move(board, (node.x - 1, node.y + 1)) and
                 self.is_valid_move(board, (node.x - 1, node.y))):
-                two_bridges.append(((node.x - 2, node.y + 1),
+                two_bridges.append((Move(node.x - 2, node.y + 1),
                                     (Move(node.x - 1, node.y + 1), Move(node.x - 1, node.y))))
 
         return two_bridges
+    
+    def get_two_bridges_score(self, board: Board) -> float:
+        """ 
+        Return a "two bridge" score that is calculated based on:
+            +two_bridge_weight for each two bridge created by making the given move. 
+            +opponent_bridge_block for every opponent two bridge that is blocked by the given move.
+
+        The more two bridges, the better the move. The more opponent two 
+        bridges that are blocked, the better the move.
+
+        A move will have a higher score if it creates multiple two bridges.
+
+        This function assumes move is a valid move.
+        """
+
+        two_bridges_score = 0
+
+        # Creates a two bridge for current player
+        two_bridges_score += (len(self.get_two_bridges(board, self._colour)) * self.weights['two_bridge_weight'])
+
+        # Blocks opponent two bridges
+        # This is not worth as much as prioritising our own bridges
+        opponent = self._colour.opposite()
+        two_bridges_score += (len(self.get_two_bridges(board, opponent)) * self.weights['opponent_bridge_block'])
+
+        return two_bridges_score
 
     def save_two_bridge(self, board: Board, opp_move: Move) -> Move | None:
+        """ Finds a two-bridge that is under threat and returns the move that will save it. """
         x, y = opp_move.x, opp_move.y
         moves_to_save = set()
 
-        original_color = board.tiles[x][y].colour
-        current_bridges = self.get_two_bridges_with_positions(board, self._colour)
+        opponent_colour = board.tiles[x][y].colour
+        current_bridges = self.get_two_bridges(board, self._colour)
 
         # Temporarily undo opponent's move
         board.set_tile_colour(x, y, None)
 
-        previous_bridges = self.get_two_bridges_with_positions(board, self._colour)
+        previous_bridges = self.get_two_bridges(board, self._colour)
 
         # Restore
-        board.set_tile_colour(x, y, original_color)
+        board.set_tile_colour(x, y, opponent_colour)
 
         # Check each bridge that existed before
         current_bridge_positions = [b[0] for b in current_bridges]

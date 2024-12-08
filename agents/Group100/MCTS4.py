@@ -238,14 +238,13 @@ class RaveAgent(AgentBase):
         return paths
     
     def evaluate_defensive_position(self, board: Board, move: tuple[int, int]) -> float:
-        """Evaluate move's defensive value"""
+        """ Evaluate move's defensive value. """
         board_hash = self.hash_board(board)
         cache_key = (board_hash, move)
         if cache_key in self.defensive_scores:
             return self.defensive_scores[cache_key]
 
         score = 0
-        x, y = move
 
         # Check if move blocks opponent's critical paths
         opp_paths = self.find_critical_paths(board, self.opposing_colour)
@@ -256,29 +255,42 @@ class RaveAgent(AgentBase):
 
         # TWO CHAIN BLOCKING
         # If the opponent is moving vertically
+        y, x = move
         if self.opposing_colour == Colour.RED:
             # Checking the [x+1, y-2] tile for chains going up
             # This is because blocking a chain starting from [x+1, y-2] is the most effective using the move [x, y]
-            if y-2 >= 0 and x+1 < board.size() and board.tiles[x+1][y-2].colour == self.opposing_colour:
+            if y-2 >= 0 and x+1 < self._board_size and board.tiles[x+1][y-2].colour == self.opposing_colour:
                 chain_size, end = self.detect_chain(board, (x+1, y-2), self.opposing_colour, 'bottom-top')
+                print(f"Chain size: {chain_size}, end: {end}")
+                if (chain_size > 2):
+                    print(board.print_board())
                 # Give a higher score if the chain is longer 
                 score += chain_size * self.weights['chain_block_weight'] * self.weights['defensive_weight'] 
                 
             # Checking the [x-1, y+2] tile for chains going down
-            elif y+2 < board.size() and x-1 >= 0 and board.tiles[x-1][y+2].colour == self.opposing_colour:
+            elif y+2 < self._board_size and x-1 >= 0 and board.tiles[x-1][y+2].colour == self.opposing_colour:
                 chain_size, end = self.detect_chain(board, (x-1, y+2), self.opposing_colour, 'top-bottom')
+                print(f"Chain size: {chain_size}, end: {end}")
+                if (chain_size > 2):
+                    print(board.print_board())
                 score += chain_size * self.weights['chain_block_weight'] * self.weights['defensive_weight']
 
         # If the opponent is moving horizontally
         elif self.opposing_colour == Colour.BLUE:
             # Checking the [x+2, y-1] tile for chains going left
-            if x+2 < board.size() and y-1 >= 0 and board.tiles[x+2][y-1].colour == self.opposing_colour:
+            if x+2 < self._board_size and y-1 >= 0 and board.tiles[x+2][y-1].colour == self.opposing_colour:
                 chain_size, end = self.detect_chain(board, (x+2, y-1), self.opposing_colour, 'right-left')
+                print(f"Chain size: {chain_size}, end: {end}")
+                if (chain_size > 2):
+                    print(board.print_board())
                 score += chain_size * self.weights['chain_block_weight'] * self.weights['defensive_weight']
                 
             # Checking the [x-2, y+1] tile for chains going right
-            elif x-2 >= 0 and y+1 < board.size() and board.tiles[x-2][y+1].colour == self.opposing_colour:
+            elif x-2 >= 0 and y+1 < self._board_size and board.tiles[x-2][y+1].colour == self.opposing_colour:
                 chain_size, end = self.detect_chain(board, (x-2, y+1), self.opposing_colour, 'left-right')
+                print(f"Chain size: {chain_size}, end: {end}")
+                if (chain_size > 2):
+                    print(board.print_board())
                 score += chain_size * self.weights['chain_block_weight'] * self.weights['defensive_weight']
 
 
@@ -287,27 +299,27 @@ class RaveAgent(AgentBase):
     
     def detect_chain(self, board: Board, move: tuple[int, int], colour: Colour, direction):
         """
-        Check if a chain_size chain exists starting from the given move and given direction.
+        Check if a chain exists starting from the given move and given direction.
+
         Args:
             board: Current game board
             move: Move to check (x, y)
-            colour: Player color to check for
-            chain_size: Number of pieces in the chain
+            colour: Player colour to check for
             direction: top-bottom or bottom-top for red, left-right or right-left for blue
         
         Returns:
             int: Size of the chain if it exists, 0 otherwise
             tuple[int, int]: Ending position of the chain
         """
-        x, y = move
+        y, x = move
 
         # Returns 0 for invalid inputs
         if direction not in ['top-bottom', 'bottom-top', 'left-right', 'right-left']:
-            return 0
+            return 0, (x, y)
         if x < 0 or x >= board.size or y < 0 or y >= board.size:
-            return 0
+            return 0, (x, y)
         if board.tiles[x][y].colour != colour:
-            return 0
+            return 0, (x, y)
         
         chain_size = 1 # Starts at 1 because the current move is already counted
         
@@ -344,7 +356,7 @@ class RaveAgent(AgentBase):
                 return chain_size, (x, y)
             
             else:
-                return 0
+                return 0, (x, y)
             
         # If the colour is blue, the chain is horizontal
         elif colour == Colour.BLUE:
@@ -375,8 +387,8 @@ class RaveAgent(AgentBase):
                 return chain_size, (x, y)
             
             else:
-                return 0
-        return 0
+                return 0, (x, y)
+        return 0, (x, y)
     
     def get_two_bridges_score(self, board: Board, move: tuple[int, int]) -> float:
         """ 

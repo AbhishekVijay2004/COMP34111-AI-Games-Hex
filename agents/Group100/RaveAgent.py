@@ -15,9 +15,7 @@ class MCTSNode:
         self.children = []
         self.wins = 0
         self.visits = 0
-        self.unexplored_children = self.get_possible_moves(board)
-        self.board_hash = None  # Store board hash for this node
-        self.creates_two_bridge = False  # Flag to indicate if this move creates a two-bridge
+        self.unexplored_children = None
 
     def get_possible_moves(self, board: Board) -> list[Move]:
         """ Get all valid moves at the current game state. """
@@ -167,7 +165,7 @@ class MCTSAgent(AgentBase):
         two_bridge_score = self.get_two_bridges_score(board)
         score += two_bridge_score
 
-        self.move_scores[move] = score
+        #self.move_scores[move] = score
         return score
     
     def should_we_swap(self, opp_move: Move) -> bool:
@@ -204,10 +202,10 @@ class MCTSAgent(AgentBase):
         start_time = time.time()
         max_time = 4.9  # Used to ensure the agent never times out
 
-        self.get_smart_moves(board)
+        self.get_possible_moves(board)
 
         # Strategic swap evaluation - should we swap?
-        if turn == 2 and self.should_we_swap(turn, opp_move):
+        if turn == 2 and self.should_we_swap(opp_move):
             return Move(-1, -1)
 
         valid_moves = self.get_possible_moves(board)
@@ -239,7 +237,7 @@ class MCTSAgent(AgentBase):
             self.backpropagate(current_node, result)
             self.current_simulation += 1
 
-        print(f"MCTS Iterations: {self.current_simulation}, Time Spent: {time.time() - start_time:.2f}s")
+        #print(f"MCTS Iterations: {self.current_simulation}, Time Spent: {time.time() - start_time:.2f}s")
 
         best_child = max(root.children, key=lambda c: c.visits)
 
@@ -251,37 +249,26 @@ class MCTSAgent(AgentBase):
         return current_node
 
     def expand_node(self, node: MCTSNode) -> MCTSNode:
+        # Update the unexplored_children so all moves are re-evaluated
+        node.unexplored_children = [move for move in self.get_smart_moves(node.board)
+                                        if self.is_valid_move(node.board, move)]
+        
         if node.unexplored_children:
-            two_bridges = self.get_two_bridges(node.board, self._colour)
-            two_bridge_moves = [move for move, _ in two_bridges]  # Get the two-bridge moves
-            
-            # If two-bridge moves exist, pick one of them first for speed
-            # TODO This is questionable, as it might not always be the best move, will need to evaluate.
-            if two_bridge_moves:
-                # Filter out all two-bridge moves
-                candidate_moves = [m for m in node.unexplored_children if any(m.x == tb.x and m.y == tb.y for tb in two_bridge_moves)]
-                if candidate_moves:
-                    move = random.choice(candidate_moves)
-                else:
-                    move = random.choice(node.unexplored_children)
-            else:
-                move = random.choice(node.unexplored_children)
-
-            node.unexplored_children.remove(move)
+            move = node.unexplored_children.pop(0)  # The first move is always the best
             new_board = node.apply_move(move, self._colour)
             child = MCTSNode(new_board, node, move)
-            child.board_hash = self.hash_board(new_board)
-            child.creates_two_bridge = any((move.x == tb.x and move.y == tb.y) for tb in two_bridge_moves)
             node.children.append(child)
+            #print("Expanding node", (new_board, node.parent, move))
             return child
+        
         return node
 
     def simulate(self, state: Board) -> bool:
         """ Run a quick random simulation to the end from the given state. """
         # Check transposition table
         current_hash = self.hash_board(state)
-        #if current_hash in self.transposition_table:
-        #    return self.transposition_table[current_hash]
+        if current_hash in self.transposition_table:
+            return self.transposition_table[current_hash]
 
         # Simulate on a copy
         simulation_board = self.copy_board(state)

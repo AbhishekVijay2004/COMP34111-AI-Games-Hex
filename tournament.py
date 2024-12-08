@@ -2,7 +2,7 @@ from src.Game import Game
 from src.Colour import Colour
 from src.Player import Player
 from agents.Group100.RaveAgent import MCTSAgent as RaveAgent
-from agents.Group100.MCTS3 import RaveAgent as RaveAgentOld
+from agents.Group100.MCTS3 import RaveAgent as MCTS3
 import random
 from concurrent.futures import ProcessPoolExecutor
 from collections import defaultdict
@@ -12,12 +12,12 @@ import os
 def play_single_game(game_id: int, swap_colors: bool = False) -> tuple[str, str, str, float]:
     """Play a single game between agents and return the result"""
     if swap_colors:
-        p1 = Player("Basic", RaveAgentOld(Colour.RED))
+        p1 = Player("Basic", MCTS3(Colour.RED))
         p2 = Player("New", RaveAgent(Colour.BLUE))
         colors = "(RED vs BLUE)"
     else:
         p1 = Player("New", RaveAgent(Colour.RED))
-        p2 = Player("Basic", RaveAgentOld(Colour.BLUE))
+        p2 = Player("Basic", MCTS3(Colour.BLUE))
         colors = "(RED vs BLUE)"
     
     game = Game(p1, p2, logDest=os.devnull, silent=True)  # Suppress output
@@ -72,4 +72,4 @@ def run_tournament(num_games: int = 100):
 
 if __name__ == "__main__":
     random.seed(42)  # For reproducibility
-    run_tournament(num_games=30)  # 50 games per color configuration = 100 total games
+    run_tournament(num_games=2)  # 50 games per color configuration = 100 total games

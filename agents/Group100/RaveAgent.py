@@ -57,7 +57,24 @@ class MCTSAgent(AgentBase):
 
     def __init__(self, colour: Colour):
         super().__init__(colour)
+        self.weights = {
+            'center_weight': 1.403,
+            'neighbor_weight': 0.943,
+            'bridge_weight': 0.943,
+            'edge_weight': 0.943,
+            'defensive_weight': 6.420,
+            'two_bridge_weight': 6.421,
+            'opponent_bridge_block': 6.418,
+            'explore_constant': 2.005,
+            'rave_constant': 340.901,
+            'early_stop_threshold': 0.934,
+            'min_visits_ratio': 0.140,
+            'swap_strength_threshold': 0.741,
+        }
         self._colour = colour
+        self.current_simulation = 0  # Keep track of current simulation (out of max total_simulations)
+        self.total_simulations = 1000  # Total number of simulations to run per move
+        self.move_scores = {}  # Cache for move evaluations
 
         # Initialize Zobrist hashing
         random.seed(42)
@@ -112,18 +129,32 @@ class MCTSAgent(AgentBase):
         x, y = (move.x, move.y) if isinstance(move, Move) else move
         return (0 <= x < board.size and 0 <= y < board.size and
                 board.tiles[x][y].colour is None)
+    
+    def evaluate_move(self, board: Board, move: tuple[int, int], colour: Colour) -> float:
+        """ 
+        Evaluates the quality of a given move for the specified player colour. 
+        
+        Returns a score where a higher score represents a better move.
+        """
+
+        if move in self.move_scores:
+            return self.move_scores[move]
+        
+        score = 0  # Initialize score
+        x, y = move
+        center = board.size // 2
+        
+        # Prioritise moves closer to the center
+        dist_to_center = abs(x - center) + abs(y - center)
+        score += (max(0, (board.size - dist_to_center)) / board.size) * self.weights['center_weight']
+
+        self.move_scores[move] = score
+        print("Evaluate move score for " + str(colour) + ":", score)
+        return score
 
     def make_move(self, turn: int, board: Board, opp_move: Move | None) -> Move:
         start_time = time.time()
-        max_time = 4.9
-
-        # Handle opponent swaps
-        if opp_move and opp_move.x == -1 and opp_move.y == -1:
-            return Move(board.size // 2, board.size // 2)
-
-        # If opponent plays center on their first move
-        if turn == 2 and board.tiles[board.size // 2][board.size // 2].colour is not None:
-            return Move(-1, -1)  # Swap if center is taken
+        max_time = 4.9  # Used to ensure the agent never times out
 
         valid_moves = self.get_possible_moves(board)
 
@@ -145,17 +176,47 @@ class MCTSAgent(AgentBase):
             
         root = MCTSNode(board)
 
-        # MCTS
-        iterations = 0
-        while time.time() - start_time < max_time:
+        # *** MCTS main loop ***
+        self.current_simulation = 0
+        while time.time() - start_time < max_time and self.current_simulation < self.total_simulations:
             current_node = self.select_node(root)
             current_node = self.expand_node(current_node)
             result = self.simulate(current_node.board)
             self.backpropagate(current_node, result)
-            iterations += 1
-        # print(f"MCTS Iterations: {iterations}, Time Spent: {time.time() - start_time:.2f}s")
+            self.current_simulation += 1
+
+        print(f"MCTS Iterations: {self.current_simulation}, Time Spent: {time.time() - start_time:.2f}s")
 
         best_child = max(root.children, key=lambda c: c.visits)
+
+
+        # Strategic Swap Evaluation - should we swap?
+        # A list of moves where it is better to swap than not to swap
+        # Taken from here: https://www.hexwiki.net/index.php/Swap_rule
+        swap_moves = []
+
+        # y-axis (2 to 8)
+        for x in range(2,9):
+            # The whole x-axis (0 to 10)
+            for y in range(11):
+                # Skip the corners
+                if not (x == 2 and y == 0) and not (x == 8 and y == 0) and not (x == 2 and y == 10) and not (x == 8 and y == 10):
+                    swap_moves.append(Move(x, y))
+        
+        # Hard coding the rest of the swap moves
+        swap_moves.append(Move(0,10))
+        swap_moves.append(Move(1,9))
+        swap_moves.append(Move(1,10))
+        swap_moves.append(Move(9,0))
+        swap_moves.append(Move(10,0))
+        swap_moves.append(Move(9,1))
+
+        # On turn 2 our agent should always be BLUE, no need to consider RED
+        if turn == 2 and opp_move is not None and self._colour == Colour.BLUE:
+            if opp_move in swap_moves:
+                return Move(-1, -1)
+
+        # If no swap,
         return Move(best_child.move.x, best_child.move.y)
 
     def select_node(self, current_node: MCTSNode) -> MCTSNode:
@@ -356,3 +417,4 @@ class MCTSAgent(AgentBase):
                     moves_to_save.add(Move(cell1.x, cell1.y))
 
         return list(moves_to_save) if moves_to_save else None
+    

@@ -1,1 +1,1 @@
-python Hex.py -p1 "agents.Group100.MCTSAgent MCTSAgent" -p1Name "MCTSAgent"
+python Hex.py -p1 "agents.Group100.RaveAgent MCTSAgent" -p1Name "RaveAgent" -p2 "agents.Group100.ValidNaiveAgent ValidNaiveAgent"

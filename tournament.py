@@ -1,12 +1,8 @@
 from src.Game import Game
 from src.Colour import Colour
 from src.Player import Player
-from agents.Group100.MainMCTSAgent import MCTSAgent
-from agents.Group100.MCTSAgentOptimised import RaveAgent as MCTSOptAgent
-# from agents.Group100.MCTS3 import RaveAgent as MCTS3Agent
+from agents.Group100.RaveAgent import MCTSAgent as RaveAgentOld
 from agents.Group100.RaveAgent import MCTSAgent as RaveAgent
-from agents.Group100.RaveBasic import MCTSAgent as RaveBasicAgent
-from agents.Group100.BasicMCTSAgent import MCTSAgent as BasicAgent
 import random
 from concurrent.futures import ProcessPoolExecutor
 from collections import defaultdict
@@ -16,12 +12,12 @@ import os
 def play_single_game(game_id: int, swap_colors: bool = False) -> tuple[str, str, str, float]:
     """Play a single game between agents and return the result"""
     if swap_colors:
-        p1 = Player("Basic", BasicAgent(Colour.RED))
+        p1 = Player("Basic", RaveAgentOld(Colour.RED))
         p2 = Player("New", RaveAgent(Colour.BLUE))
         colors = "(RED vs BLUE)"
     else:
         p1 = Player("New", RaveAgent(Colour.RED))
-        p2 = Player("Basic", BasicAgent(Colour.BLUE))
+        p2 = Player("Basic", RaveAgentOld(Colour.BLUE))
         colors = "(RED vs BLUE)"
     
     game = Game(p1, p2, logDest=os.devnull, silent=True)  # Suppress output

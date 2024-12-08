@@ -162,7 +162,7 @@ class MCTSAgent(AgentBase):
         score += (max(0, (board.size - dist_to_center)) / board.size) * self.weights['center_weight']
 
         # Prioritise moves that make or block two bridges
-        two_bridge_score = self.get_two_bridges_score(board)
+        two_bridge_score = self.get_two_bridges_score(board, move)
         score += two_bridge_score
 
         #self.move_scores[move] = score
@@ -224,6 +224,7 @@ class MCTSAgent(AgentBase):
         if opp_move:
             save_move = self.save_two_bridge(board, opp_move)
             if save_move:
+                print("SAVING TWO BRIDGE\n\n")
                 return random.choice(save_move)
             
         root = MCTSNode(board)
@@ -258,7 +259,6 @@ class MCTSAgent(AgentBase):
             new_board = node.apply_move(move, self._colour)
             child = MCTSNode(new_board, node, move)
             node.children.append(child)
-            #print("Expanding node", (new_board, node.parent, move))
             return child
         
         return node
@@ -307,62 +307,107 @@ class MCTSAgent(AgentBase):
                 node.wins += 1
             node = node.parent
 
-    def get_two_bridges(self, board: Board, colour: Colour) -> list[tuple[Move, tuple[Move, Move]]]:
+    def get_two_bridges(self, board: Board, colour: Colour, move: Move = None) -> list[tuple[Move, tuple[Move, Move]]]:
         """
         Returns a list of two bridges that can be created by the given colour.
 
         Returns the move needed to make the two bridge and the two empty cells that will be created in the form of:
             [(move_position, (empty_cell1, empty_cell2)), ...]
         """
-        two_bridges = []
-        current_nodes = self.get_all_positions_for_colour(board, colour)
 
-        for node in current_nodes:
+        two_bridges = []
+
+        if move:
             # Pattern 1: Top-left bridge
-            if (self.is_my_tile(board, (node.x - 1, node.y - 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y)) and
-                self.is_valid_move(board, (node.x, node.y - 1))):
-                two_bridges.append((Move(node.x - 1, node.y - 1),
-                                    (Move(node.x - 1, node.y), Move(node.x, node.y - 1))))
+            if (self.is_my_tile(board, (move.x - 1, move.y - 1)) and
+                self.is_valid_move(board, (move.x - 1, move.y)) and
+                self.is_valid_move(board, (move.x, move.y - 1))):
+                two_bridges.append((Move(move.x - 1, move.y - 1),
+                                    (Move(move.x - 1, move.y), Move(move.x, move.y - 1))))
 
             # Pattern 2: Top-right bridge
-            if (self.is_my_tile(board, (node.x + 1, node.y - 2)) and
-                self.is_valid_move(board, (node.x, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y - 1))):
-                two_bridges.append((Move(node.x + 1, node.y - 2),
-                                    (Move(node.x, node.y - 1), Move(node.x + 1, node.y - 1))))
+            if (self.is_my_tile(board, (move.x + 1, move.y - 2)) and
+                self.is_valid_move(board, (move.x, move.y - 1)) and
+                self.is_valid_move(board, (move.x + 1, move.y - 1))):
+                two_bridges.append((Move(move.x + 1, move.y - 2),
+                                    (Move(move.x, move.y - 1), Move(move.x + 1, move.y - 1))))
 
             # Pattern 3: Right bridge
-            if (self.is_my_tile(board, (node.x + 2, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y))):
-                two_bridges.append((Move(node.x + 2, node.y - 1),
-                                    (Move(node.x + 1, node.y - 1), Move(node.x + 1, node.y))))
+            if (self.is_my_tile(board, (move.x + 2, move.y - 1)) and
+                self.is_valid_move(board, (move.x + 1, move.y - 1)) and
+                self.is_valid_move(board, (move.x + 1, move.y))):
+                two_bridges.append((Move(move.x + 2, move.y - 1),
+                                    (Move(move.x + 1, move.y - 1), Move(move.x + 1, move.y))))
 
             # Pattern 4: Bottom-right bridge
-            if (self.is_my_tile(board, (node.x + 1, node.y + 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y)) and
-                self.is_valid_move(board, (node.x, node.y + 1))):
-                two_bridges.append((Move(node.x + 1, node.y + 1),
-                                    (Move(node.x + 1, node.y), Move(node.x, node.y + 1))))
+            if (self.is_my_tile(board, (move.x + 1, move.y + 1)) and
+                self.is_valid_move(board, (move.x + 1, move.y)) and
+                self.is_valid_move(board, (move.x, move.y + 1))):
+                two_bridges.append((Move(move.x + 1, move.y + 1),
+                                    (Move(move.x + 1, move.y), Move(move.x, move.y + 1))))
 
             # Pattern 5: Bottom-left bridge
-            if (self.is_my_tile(board, (node.x - 1, node.y + 2)) and
-                self.is_valid_move(board, (node.x, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y + 1))):
-                two_bridges.append((Move(node.x - 1, node.y + 2),
-                                    (Move(node.x, node.y + 1), Move(node.x - 1, node.y + 1))))
+            if (self.is_my_tile(board, (move.x - 1, move.y + 2)) and
+                self.is_valid_move(board, (move.x, move.y + 1)) and
+                self.is_valid_move(board, (move.x - 1, move.y + 1))):
+                two_bridges.append((Move(move.x - 1, move.y + 2),
+                                    (Move(move.x, move.y + 1), Move(move.x - 1, move.y + 1))))
 
             # Pattern 6: Left bridge
-            if (self.is_my_tile(board, (node.x - 2, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y))):
-                two_bridges.append((Move(node.x - 2, node.y + 1),
-                                    (Move(node.x - 1, node.y + 1), Move(node.x - 1, node.y))))
+            if (self.is_my_tile(board, (move.x - 2, move.y + 1)) and
+                self.is_valid_move(board, (move.x - 1, move.y + 1)) and
+                self.is_valid_move(board, (move.x - 1, move.y))):
+                two_bridges.append((Move(move.x - 2, move.y + 1),
+                                    (Move(move.x - 1, move.y + 1), Move(move.x - 1, move.y))))
+        else: 
+            current_nodes = self.get_all_positions_for_colour(board, colour)
+
+            for node in current_nodes:
+                # Pattern 1: Top-left bridge
+                if (self.is_my_tile(board, (node.x - 1, node.y - 1)) and
+                    self.is_valid_move(board, (node.x - 1, node.y)) and
+                    self.is_valid_move(board, (node.x, node.y - 1))):
+                    two_bridges.append((Move(node.x - 1, node.y - 1),
+                                        (Move(node.x - 1, node.y), Move(node.x, node.y - 1))))
+
+                # Pattern 2: Top-right bridge
+                if (self.is_my_tile(board, (node.x + 1, node.y - 2)) and
+                    self.is_valid_move(board, (node.x, node.y - 1)) and
+                    self.is_valid_move(board, (node.x + 1, node.y - 1))):
+                    two_bridges.append((Move(node.x + 1, node.y - 2),
+                                        (Move(node.x, node.y - 1), Move(node.x + 1, node.y - 1))))
+
+                # Pattern 3: Right bridge
+                if (self.is_my_tile(board, (node.x + 2, node.y - 1)) and
+                    self.is_valid_move(board, (node.x + 1, node.y - 1)) and
+                    self.is_valid_move(board, (node.x + 1, node.y))):
+                    two_bridges.append((Move(node.x + 2, node.y - 1),
+                                        (Move(node.x + 1, node.y - 1), Move(node.x + 1, node.y))))
+
+                # Pattern 4: Bottom-right bridge
+                if (self.is_my_tile(board, (node.x + 1, node.y + 1)) and
+                    self.is_valid_move(board, (node.x + 1, node.y)) and
+                    self.is_valid_move(board, (node.x, node.y + 1))):
+                    two_bridges.append((Move(node.x + 1, node.y + 1),
+                                        (Move(node.x + 1, node.y), Move(node.x, node.y + 1))))
+
+                # Pattern 5: Bottom-left bridge
+                if (self.is_my_tile(board, (node.x - 1, node.y + 2)) and
+                    self.is_valid_move(board, (node.x, node.y + 1)) and
+                    self.is_valid_move(board, (node.x - 1, node.y + 1))):
+                    two_bridges.append((Move(node.x - 1, node.y + 2),
+                                        (Move(node.x, node.y + 1), Move(node.x - 1, node.y + 1))))
+
+                # Pattern 6: Left bridge
+                if (self.is_my_tile(board, (node.x - 2, node.y + 1)) and
+                    self.is_valid_move(board, (node.x - 1, node.y + 1)) and
+                    self.is_valid_move(board, (node.x - 1, node.y))):
+                    two_bridges.append((Move(node.x - 2, node.y + 1),
+                                        (Move(node.x - 1, node.y + 1), Move(node.x - 1, node.y))))
 
         return two_bridges
     
-    def get_two_bridges_score(self, board: Board) -> float:
+    def get_two_bridges_score(self, board: Board, move: Move) -> float:
         """ 
         Return a "two bridge" score that is calculated based on:
             +two_bridge_weight for each two bridge created by making the given move. 
@@ -379,7 +424,33 @@ class MCTSAgent(AgentBase):
         two_bridges_score = 0
 
         # Creates a two bridge for current player
-        two_bridges_score += (len(self.get_two_bridges(board, self._colour)) * self.weights['two_bridge_weight'])
+        two_bridges_score += (len(self.get_two_bridges(board, self._colour, move)) * self.weights['two_bridge_weight'])
+
+        # Blocks opponent two bridges
+        # This is not worth as much as prioritising our own bridges
+        opponent = self._colour.opposite()
+        two_bridges_score += (len(self.get_two_bridges(board, opponent, move)) * self.weights['opponent_bridge_block'])
+
+        return two_bridges_score
+    
+    def get_straight_line_connection_score(self, board: Board) -> float:
+        """ 
+        Return a "connection" score that is calculated based on:
+            +connection_weight for each tile that is connected to another tile by making the given move.
+
+        If the move connects a tile to another tile then it is a good move.
+        """
+
+        connection_score = 0
+
+        # +-1 in any direction
+
+        # get neighbours of the current move
+        # if >= 2 neighbours are the same colour, then add to connection score as a connection will be made
+        # need to prioritise neighbours that are not already connected to each other though...
+
+        # Creates a two bridge for current player
+        connection_score += (len(self.get_two_bridges(board, self._colour)) * self.weights['two_bridge_weight'])
 
         # Blocks opponent two bridges
         # This is not worth as much as prioritising our own bridges

@@ -15,7 +15,7 @@ class MCTSNode:
         self.children = []
         self.wins = 0
         self.visits = 0
-        self.unexplored_children = None
+        self.unexplored_children = self.get_possible_moves(board)
 
     def get_possible_moves(self, board: Board) -> list[Move]:
         """ Get all valid moves at the current game state. """
@@ -250,11 +250,11 @@ class MCTSAgent(AgentBase):
         return current_node
 
     def expand_node(self, node: MCTSNode) -> MCTSNode:
-        # Update the unexplored_children so all moves are re-evaluated
-        node.unexplored_children = [move for move in self.get_smart_moves(node.board)
-                                        if self.is_valid_move(node.board, move)]
-        
         if node.unexplored_children:
+            # Re-evaluate all unexplored_children so that the best move is always chosen
+            node.unexplored_children = sorted(node.unexplored_children, 
+                                                key=lambda move: self.evaluate_move(node.board, move, self._colour), 
+                                                reverse=True)
             move = node.unexplored_children.pop(0)  # The first move is always the best
             new_board = node.apply_move(move, self._colour)
             child = MCTSNode(new_board, node, move)

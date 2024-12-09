@@ -61,6 +61,7 @@ class MCTSAgent(AgentBase):
             'bridge_weight': 0.943,
             'edge_weight': 0.943,
             'defensive_weight': 6.420,
+            'connection_weight': 2.5,
             'parallel_two_bridge_weight': 6.421,
             'perpendicular_two_bridge_weight': 6.221,
             'diagonal_two_bridge_weight': 6.321,
@@ -171,6 +172,10 @@ class MCTSAgent(AgentBase):
         # Prioritise moves that make or block two bridges
         two_bridge_score = self.get_two_bridges_score(board, move)
         score += two_bridge_score
+
+        # Prioritise moves that connect tiles
+        connection_score = self.get_straight_line_connection_score(board, move)
+        score += connection_score
 
         #self.move_scores[move] = score
         return score
@@ -454,7 +459,7 @@ class MCTSAgent(AgentBase):
 
         return two_bridges_score
     
-    def get_straight_line_connection_score(self, board: Board) -> float:
+    def get_straight_line_connection_score(self, board: Board, move: Move) -> float:
         """ 
         Return a "connection" score that is calculated based on:
             +connection_weight for each tile that is connected to another tile by making the given move.
@@ -464,21 +469,49 @@ class MCTSAgent(AgentBase):
 
         connection_score = 0
 
-        # +-1 in any direction
+        x, y = move 
 
-        # get neighbours of the current move
-        # if >= 2 neighbours are the same colour, then add to connection score as a connection will be made
-        # need to prioritise neighbours that are not already connected to each other though...
+        # if win condition is vertical
+        if self.colour == Colour.RED:
+            vertical_connections = 0
+            horizontal_connections = 0
+            if (self.is_my_tile(board, (x-1, y))):
+                vertical_connections += 1
+            if (self.is_my_tile(board, (x-1, y+1))):
+                vertical_connections += 1
+            if (self.is_my_tile(board, (x+1, y))):
+                vertical_connections += 1
+            if (self.is_my_tile(board, (x+1, y-1))):
+                vertical_connections += 1
 
-        # Creates a two bridge for current player
-        connection_score += (len(self.get_two_bridges(board, self._colour)) * self.weights['two_bridge_weight'])
+            if (self.is_my_tile(board, (x, y-1))):
+                horizontal_connections += 1
+            if (self.is_my_tile(board, (x, y+1))):
+                horizontal_connections += 1
+                
+            connection_score += (vertical_connections + (horizontal_connections/2)) * self.weights['connection_weight']
 
-        # Blocks opponent two bridges
-        # This is not worth as much as prioritising our own bridges
-        opponent = self._colour.opposite()
-        two_bridges_score += (len(self.get_two_bridges(board, opponent)) * self.weights['opponent_bridge_block'])
+        # if win condition is horizontal
+        if self.colour == Colour.BLUE:
+            vertical_connections = 0
+            horizontal_connections = 0
+            if (self.is_my_tile(board, (x-1, y+1))):
+                horizontal_connections += 1
+            if (self.is_my_tile(board, (x, y+1))):
+                horizontal_connections += 1
+            if (self.is_my_tile(board, (x, y-1))):
+                horizontal_connections += 1
+            if (self.is_my_tile(board, (x+1, y-1))):
+                horizontal_connections += 1
 
-        return two_bridges_score
+            if (self.is_my_tile(board, (x+1, y))):
+                vertical_connections += 1
+            if (self.is_my_tile(board, (x-1, y))):
+                vertical_connections += 1
+                
+            connection_score += (vertical_connections + (horizontal_connections/2)) * self.weights['connection_weight']
+
+        return connection_score
 
     def find_two_bridge_saving_moves(self, board: Board) -> list[Move]:
         """ 

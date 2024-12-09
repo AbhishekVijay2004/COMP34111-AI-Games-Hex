@@ -113,6 +113,11 @@ class MCTSAgent(AgentBase):
         x, y = (move.x, move.y) if isinstance(move, Move) else move
         return (0 <= x < board.size and 0 <= y < board.size and
                 board.tiles[x][y].colour is self._colour)
+    
+    def is_opponent_tile(self, board: Board, move: Move | tuple[int, int]) -> bool:
+        x, y = (move.x, move.y) if isinstance(move, Move) else move
+        return (0 <= x < board.size and 0 <= y < board.size and
+                board.tiles[x][y].colour is Colour.opposite(self._colour))
 
     def check_immediate_win(self, board: Board, move: Move | tuple[int, int], player: Colour) -> bool:
         x, y = (move.x, move.y) if isinstance(move, Move) else move
@@ -224,9 +229,8 @@ class MCTSAgent(AgentBase):
 
         # Save two-bridge if threatened
         if opp_move:
-            save_move = self.save_two_bridge(board, opp_move)
+            save_move = self.find_two_bridge_saving_moves(board)
             if save_move:
-                print("SAVING TWO BRIDGE\n\n")
                 return random.choice(save_move)
             
         root = MCTSNode(board)
@@ -476,32 +480,89 @@ class MCTSAgent(AgentBase):
 
         return two_bridges_score
 
-    def save_two_bridge(self, board: Board, opp_move: Move) -> Move | None:
-        """ Finds a two-bridge that is under threat and returns the move that will save it. """
-        x, y = opp_move.x, opp_move.y
-        moves_to_save = set()
+    def find_two_bridge_saving_moves(self, board: Board) -> list[Move]:
+        """ 
+        Returns a list of moves to save any threatened two bridges on the board. 
+        
+        This function searches the whole board and finds two bridges that are threatened 
+        by the opponent, and then returns a list of moves that can save them.
+        """
 
-        opponent_colour = board.tiles[x][y].colour
-        current_bridges = self.get_two_bridges(board, self._colour)
+        saving_moves = []
 
-        # Temporarily undo opponent's move
-        board.set_tile_colour(x, y, None)
+        for x in range(board.size):
+            for y in range(board.size):
+                if self.is_my_tile(board, (x, y)):
+                    # Pattern 1: Top-left bridge
+                    if (self.is_my_tile(board, (x - 1, y - 1)) and 
+                        self.is_opponent_tile(board, (x - 1, y)) and 
+                        self.is_valid_move(board, (x, y - 1))):
+                        saving_moves.append(Move(x, y - 1))
+                    
+                    # Pattern 1: Top-left bridge
+                    if (self.is_my_tile(board, (x - 1, y - 1)) and 
+                        self.is_valid_move(board, (x - 1, y)) and 
+                        self.is_opponent_tile(board, (x, y - 1))):
+                        saving_moves.append(Move(x - 1, y))
 
-        previous_bridges = self.get_two_bridges(board, self._colour)
+                    # Pattern 2: Top-right bridge
+                    if (self.is_my_tile(board, (x + 1, y - 2)) and
+                        self.is_opponent_tile(board, (x, y - 1)) and
+                        self.is_valid_move(board, (x + 1, y - 1))):
+                        saving_moves.append(Move(x + 1, y - 1))
 
-        # Restore
-        board.set_tile_colour(x, y, opponent_colour)
+                    # Pattern 2: Top-right bridge
+                    if (self.is_my_tile(board, (x + 1, y - 2)) and
+                        self.is_valid_move(board, (x, y - 1)) and
+                        self.is_opponent_tile(board, (x + 1, y - 1))):
+                        saving_moves.append(Move(x, y - 1))
 
-        # Check each bridge that existed before
-        current_bridge_positions = [b[0] for b in current_bridges]
+                    # Pattern 3: Right bridge
+                    if (self.is_my_tile(board, (x + 2, y - 1)) and
+                        self.is_opponent_tile(board, (x + 1, y - 1)) and
+                        self.is_valid_move(board, (x + 1, y))):
+                        saving_moves.append(Move(x + 1, y))
 
-        for bridge_pos1, empty_cells, bridge_pos2 in previous_bridges:
-            if bridge_pos1 not in current_bridge_positions:
-                cell1, cell2 = empty_cells
-                if (x, y) == (cell1.x, cell1.y) and self.is_valid_move(board, (cell2.x, cell2.y)):
-                    moves_to_save.add(Move(cell2.x, cell2.y))
-                elif (x, y) == (cell2.x, cell2.y) and self.is_valid_move(board, (cell1.x, cell1.y)):
-                    moves_to_save.add(Move(cell1.x, cell1.y))
+                    # Pattern 3: Right bridge
+                    if (self.is_my_tile(board, (x + 2, y - 1)) and
+                        self.is_valid_move(board, (x + 1, y - 1)) and
+                        self.is_opponent_tile(board, (x + 1, y))):
+                        saving_moves.append(Move(x + 1, y - 1))
 
-        return list(moves_to_save) if moves_to_save else None
-    
+                    # Pattern 4: Bottom-right bridge
+                    if (self.is_my_tile(board, (x + 1, y + 1)) and
+                        self.is_opponent_tile(board, (x + 1, y)) and
+                        self.is_valid_move(board, (x, y + 1))):
+                        saving_moves.append(Move(x, y + 1))
+
+                    # Pattern 4: Bottom-right bridge
+                    if (self.is_my_tile(board, (x + 1, y + 1)) and
+                        self.is_valid_move(board, (x + 1, y)) and
+                        self.is_opponent_tile(board, (x, y + 1))):
+                        saving_moves.append(Move(x + 1, y))
+
+                    # Pattern 5: Bottom-left bridge
+                    if (self.is_my_tile(board, (x - 1, y + 2)) and
+                        self.is_opponent_tile(board, (x, y + 1)) and
+                        self.is_valid_move(board, (x - 1, y + 1))):
+                        saving_moves.append(Move(x - 1, y + 1))
+
+                    # Pattern 5: Bottom-left bridge
+                    if (self.is_my_tile(board, (x - 1, y + 2)) and
+                        self.is_valid_move(board, (x, y + 1)) and
+                        self.is_opponent_tile(board, (x - 1, y + 1))):
+                        saving_moves.append(Move(x, y + 1))
+
+                    # Pattern 6: Left bridge
+                    if (self.is_my_tile(board, (x - 2, y + 1)) and
+                        self.is_opponent_tile(board, (x - 1, y + 1)) and
+                        self.is_valid_move(board, (x - 1, y))):
+                        saving_moves.append(Move(x - 1, y))
+
+                    # Pattern 6: Left bridge
+                    if (self.is_my_tile(board, (x - 2, y + 1)) and
+                        self.is_valid_move(board, (x - 1, y + 1)) and
+                        self.is_opponent_tile(board, (x - 1, y))):
+                        saving_moves.append(Move(x - 1, y + 1))
+
+        return saving_moves

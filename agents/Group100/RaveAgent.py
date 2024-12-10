@@ -1,4 +1,5 @@
 from math import log, sqrt
+from itertools import combinations
 import random
 import time
 
@@ -56,16 +57,16 @@ class MCTSAgent(AgentBase):
     def __init__(self, colour: Colour):
         super().__init__(colour)
         self.weights = {
-            'center_weight': 1.403,
-            'neighbor_weight': 0.943,
+            'center_weight': 1.403,  # Moves closer to the center are prioritised
+            'neighbour_weight': 0.943,
             'bridge_weight': 0.943,
             'edge_weight': 0.943,
             'defensive_weight': 6.420,
-            'connection_weight': 2.5,
-            'parallel_two_bridge_weight': 6.421,
-            'perpendicular_two_bridge_weight': 6.221,
-            'diagonal_two_bridge_weight': 6.321,
-            'opponent_bridge_block': 6.118,
+            'connection_weight': 2.5,  # Moves that connect tiles
+            'parallel_two_bridge_weight': 6.421,  # Moves that create two bridges in the intended direction
+            'perpendicular_two_bridge_weight': 6.221,  # Moves that create two bridges in the unintended direction
+            'diagonal_two_bridge_weight': 6.321,  # Moves that create two bridges diagonally
+            'opponent_bridge_block': 6.118,  # Moves that block opponent two bridges
             'explore_constant': 2.005,
             'rave_constant': 340.901,
             'early_stop_threshold': 0.934,
@@ -105,20 +106,49 @@ class MCTSAgent(AgentBase):
 
         # Sort the moves by their evaluation score
         smart_moves = sorted(valid_moves, 
-                                key=lambda move: self.evaluate_move(board, move, self._colour), 
+                                key=lambda move: self.evaluate_move(board, move), 
                                 reverse=True)
         
         return smart_moves
     
     def is_my_tile(self, board: Board, move: Move | tuple[int, int]) -> bool:
+        """ Returns True if the given move is the same colour as (owned by) the agent, False otherwise. """
         x, y = (move.x, move.y) if isinstance(move, Move) else move
         return (0 <= x < board.size and 0 <= y < board.size and
                 board.tiles[x][y].colour is self._colour)
     
     def is_opponent_tile(self, board: Board, move: Move | tuple[int, int]) -> bool:
+        """ Returns True if the given move is an opponent tile, False otherwise. """
         x, y = (move.x, move.y) if isinstance(move, Move) else move
         return (0 <= x < board.size and 0 <= y < board.size and
                 board.tiles[x][y].colour is Colour.opposite(self._colour))
+    
+    def get_neighbours_of_colour(self, board: Board, move: Move | tuple[int, int], colour: Colour) -> list[Move]:
+        """ Returns a list of neighbours of the current move if they match the specified player colour. """
+        x, y = (move.x, move.y) if isinstance(move, Move) else move
+        neighbours = []
+        for dx, dy in [(1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)]:
+            if 0 <= x + dx < board.size and 0 <= y + dy < board.size:
+                if board.tiles[x + dx][y + dy].colour is colour:
+                    neighbours.append(Move(x + dx, y + dy))
+        return neighbours
+    
+    def is_neighbour(self, move1: Move | tuple[int, int], move2: Move | tuple[int, int]) -> bool:
+        """ Returns True if the two given moves are neighbours, False otherwise. """
+        x1, y1 = (move1.x, move1.y) if isinstance(move1, Move) else move1
+        x2, y2 = (move2.x, move2.y) if isinstance(move2, Move) else move2
+
+        move1_relative_neighbors_positions = [
+            (x1 - 1, y1),
+            (x1 + 1, y1),
+            (x1 - 1, y1 + 1),
+            (x1 + 1, y1 + 1),
+            (x1, y1 - 1),
+            (x1, y1 + 1),
+        ]
+
+        # Return True if move2 is in the list of relative neighbours of move1
+        return (x2, y2) in move1_relative_neighbors_positions
 
     def check_immediate_win(self, board: Board, move: Move | tuple[int, int], player: Colour) -> bool:
         x, y = (move.x, move.y) if isinstance(move, Move) else move
@@ -151,16 +181,13 @@ class MCTSAgent(AgentBase):
         return (0 <= x < board.size and 0 <= y < board.size and
                 board.tiles[x][y].colour is None)
     
-    def evaluate_move(self, board: Board, move: Move | tuple[int, int], colour: Colour) -> float:
+    def evaluate_move(self, board: Board, move: Move | tuple[int, int]) -> float:
         """ 
-        Evaluates the quality of a given move for the specified player colour. 
+        Evaluates the quality of a given move. 
         
         Returns a score where a higher score represents a better move.
         """
 
-        #if move in self.move_scores:
-        #    return self.move_scores[move]
-        
         score = 0  # Initialize score
         x, y = (move.x, move.y) if isinstance(move, Move) else move
         center = board.size // 2
@@ -174,10 +201,9 @@ class MCTSAgent(AgentBase):
         score += two_bridge_score
 
         # Prioritise moves that connect tiles
-        connection_score = self.get_straight_line_connection_score(board, move)
+        connection_score = self.get_connection_score(board, move)
         score += connection_score
 
-        #self.move_scores[move] = score
         return score
     
     def should_we_swap(self, opp_move: Move) -> bool:
@@ -249,7 +275,7 @@ class MCTSAgent(AgentBase):
             self.backpropagate(current_node, result)
             self.current_simulation += 1
 
-        #print(f"MCTS Iterations: {self.current_simulation}, Time Spent: {time.time() - start_time:.2f}s")
+        #print(f"Turn {turn}: MCTS Iterations: {self.current_simulation}, Time Spent: {time.time() - start_time:.2f}s")
 
         best_child = max(root.children, key=lambda c: c.visits)
 
@@ -264,7 +290,7 @@ class MCTSAgent(AgentBase):
         if node.unexplored_children:
             # Re-evaluate all unexplored_children so that the best move is always chosen
             node.unexplored_children = sorted(node.unexplored_children, 
-                                                key=lambda move: self.evaluate_move(node.board, move, self._colour), 
+                                                key=lambda move: self.evaluate_move(node.board, move), 
                                                 reverse=True)
             move = node.unexplored_children.pop(0)  # The first move is always the best
             new_board = node.apply_move(move, self._colour)
@@ -459,57 +485,29 @@ class MCTSAgent(AgentBase):
 
         return two_bridges_score
     
-    def get_straight_line_connection_score(self, board: Board, move: Move) -> float:
+    def get_connection_score(self, board: Board, move: Move) -> float:
         """ 
-        Return a "connection" score that is calculated based on:
+        Calculates a "connection" score that is calculated based on:
             +connection_weight for each tile that is connected to another tile by making the given move.
 
-        If the move connects a tile to another tile then it is a good move.
+        The more tiles that are connected, the better the move. This ignores already connected tiles.
         """
 
         connection_score = 0
 
-        x, y = move 
+        # Get all neighbours (that we own, not interested in opponent tiles) of the move
+        neighbours = self.get_neighbours_of_colour(board, move, self._colour)
 
-        # if win condition is vertical
-        if self.colour == Colour.RED:
-            vertical_connections = 0
-            horizontal_connections = 0
-            if (self.is_my_tile(board, (x-1, y))):
-                vertical_connections += 1
-            if (self.is_my_tile(board, (x-1, y+1))):
-                vertical_connections += 1
-            if (self.is_my_tile(board, (x+1, y))):
-                vertical_connections += 1
-            if (self.is_my_tile(board, (x+1, y-1))):
-                vertical_connections += 1
+        # Find all possible ways of pairing the neighbours
+        neighbour_pairs = list(combinations(neighbours, 2))
 
-            if (self.is_my_tile(board, (x, y-1))):
-                horizontal_connections += 1
-            if (self.is_my_tile(board, (x, y+1))):
-                horizontal_connections += 1
-                
-            connection_score += (vertical_connections + (horizontal_connections/2)) * self.weights['connection_weight']
+        # For all pairs of neighbours,
+        for pair in neighbour_pairs:
+            n1, n2 = pair
 
-        # if win condition is horizontal
-        if self.colour == Colour.BLUE:
-            vertical_connections = 0
-            horizontal_connections = 0
-            if (self.is_my_tile(board, (x-1, y+1))):
-                horizontal_connections += 1
-            if (self.is_my_tile(board, (x, y+1))):
-                horizontal_connections += 1
-            if (self.is_my_tile(board, (x, y-1))):
-                horizontal_connections += 1
-            if (self.is_my_tile(board, (x+1, y-1))):
-                horizontal_connections += 1
-
-            if (self.is_my_tile(board, (x+1, y))):
-                vertical_connections += 1
-            if (self.is_my_tile(board, (x-1, y))):
-                vertical_connections += 1
-                
-            connection_score += (vertical_connections + (horizontal_connections/2)) * self.weights['connection_weight']
+            # If n1 and n2 are not already neighbours, then adding the move will connect them
+            if not self.is_neighbour(n1, n2):
+                connection_score += self.weights['connection_weight']
 
         return connection_score
 

@@ -161,11 +161,7 @@ class MCTSAgent(AgentBase):
         Decide which move to make using MCTS and heuristics.
         """
         start_time = time.time()
-        max_time = 1.9
-
-        # Handle opponent swaps
-        if opp_move and opp_move.x == -1 and opp_move.y == -1:
-            return Move(board.size // 2, board.size // 2)
+        max_time = 4.9
 
         # Check swap logic early in the game
         if turn == 2 and opp_move and self.should_we_swap(opp_move):
@@ -398,91 +394,4 @@ class MCTSAgent(AgentBase):
             if opp_move in swap_moves:
                 return True
         return False
-    
-    
-    # NEW METHODS
-    
-    def bridge_direction(self, bridge: tuple[Move, tuple[Move, Move], Move]) -> str:
-        """ Returns the direction of a bridge. Vertical if going up/down, horizontal if left/right, diagonal if in between. """
-        bridge_pos1, _, bridge_pos2 = bridge
-
-        if abs(bridge_pos1.x - bridge_pos2.x) >= 2:
-            return "vertical"
-        elif abs(bridge_pos1.y - bridge_pos2.y) >= 2:
-            return "horizontal"
-        else:
-            return "diagonal"
-        
-        
-    def get_two_bridges_score(self, board: Board, move: Move) -> float:
-        """ 
-        Return a "two bridge" score that is calculated based on:
-            +parallel_two_bridge_weight for each two bridge created by making the given move in the intended direction (e.g. top-bottom or left-right). 
-
-            +perpendicular_two_bridge_weight for each two bridge created by making the given move in the unintended direction 
-            (e.g. top-bottom or left-right). This is less than parallel_two_bridge_weight, but still better than a random move.
-
-            +diagonal_two_bridge_weight for each two bridge created by making the given move in the middle of the intended and 
-            unintended direction. This is less than parallel_two_bridge_weight, but better than perpendicular_two_bridge_weight.
-
-            +opponent_bridge_block for every opponent two bridge that is blocked by the given move.
-
-        The more two bridges, the better the move. The more opponent two 
-        bridges that are blocked, the better the move.
-
-        A move will have a higher score if it creates multiple two bridges.
-
-        This function assumes move is a valid move.
-        """
-
-        two_bridges_score = 0
-
-        # Creates a two bridge for current player
-        player_bridges = self.get_two_bridges(board, self._colour, move)
-        for bridge in player_bridges:
-            if (self._colour == Colour.RED and self.bridge_direction(bridge) == 'vertical') or \
-               (self._colour == Colour.BLUE and self.bridge_direction(bridge) == 'horizontal'):
-                # Greatest weighting for parallel bridges (those that travel the furthest in the intended direction)
-                two_bridges_score += self.weights['parallel_two_bridge_weight']
-            elif (self._colour == Colour.RED and self.bridge_direction(bridge) == 'horizontal') or \
-               (self._colour == Colour.BLUE and self.bridge_direction(bridge) == 'vertical'):
-                # Least weighting for perpendicular bridges (those that travel the furthest in the unintended direction)
-                two_bridges_score += self.weights['perpendicular_two_bridge_weight']
-            else:
-                # Slightly less weighting for diagonal bridges (those that move left/right in the intended direction)
-                two_bridges_score += self.weights['diagonal_two_bridge_weight']
-
-        # Blocks opponent two bridges
-        # This is not worth as much as prioritising our own bridges
-        opponent = self._colour.opposite()
-        two_bridges_score += (len(self.get_two_bridges(board, opponent, move)) * self.weights['opponent_bridge_block'])
-
-        return two_bridges_score
-    
-    def evaluate_move(self, board: Board, move: Move | tuple[int, int]) -> float:
-        """ 
-        Evaluates the quality of a given move. 
-        
-        Returns a score where a higher score represents a better move.
-        """
-
-        score = 0  # Initialize score
-        x, y = (move.x, move.y) if isinstance(move, Move) else move
-        center = board.size // 2
-        
-        # Prioritise moves closer to the center
-        dist_to_center = abs(x - center) + abs(y - center)
-        score += (max(0, (board.size - dist_to_center)) / board.size) * self.weights['center_weight']
-
-        # Prioritise moves that make or block two bridges
-        two_bridge_score = self.get_two_bridge_score(board, move)
-        score += two_bridge_score
-
-        # Prioritise moves that connect tiles
-        connection_score = self.get_connection_score(board, move)
-        score += connection_score
-
-        return score
-    
-    
     

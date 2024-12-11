@@ -7,7 +7,12 @@ from src.Board import Board
 from src.Colour import Colour
 from src.Move import Move
 
+
 class MCTSNode:
+    """
+    A node in the Monte Carlo Tree Search (MCTS) tree.
+    Each node represents a game state and holds statistics for UCT calculations.
+    """
     def __init__(self, board: Board, parent=None, move=None):
         self.board = board
         self.parent = parent
@@ -16,11 +21,11 @@ class MCTSNode:
         self.wins = 0
         self.visits = 0
         self.unexplored_children = self.get_possible_moves(board)
-        self.board_hash = None  # Store board hash for this node
-        self.creates_two_bridge = False  # Flag to indicate if this move creates a two-bridge
+        self.board_hash = None  # Store board hash for caching or transposition
+        self.creates_two_bridge = False  # Flag if this move leads to a two-bridge formation
 
     def get_possible_moves(self, board: Board) -> list[Move]:
-        """ Get all valid moves at the current game state. """
+        """Get all valid moves at the current state."""
         valid_moves = []
         for x in range(board.size):
             for y in range(board.size):
@@ -29,14 +34,17 @@ class MCTSNode:
         return valid_moves
 
     def calculate_uct_score(self, c_param=1.4) -> float:
-        """ Calculate UCT score for node selection. """
+        """
+        Calculate the UCT (Upper Confidence Bound applied to Trees) score.
+        """
         if self.visits == 0:
             return float('inf')
-        return ((self.wins / self.visits) +
-                c_param * sqrt((2 * log(self.parent.visits)) / self.visits))
-    
+        exploitation = self.wins / self.visits
+        exploration = sqrt((2 * log(self.parent.visits)) / self.visits)
+        return exploitation + c_param * exploration
+
     def copy_board(self, board: Board) -> Board:
-        """Create an efficient copy of the board state."""
+        """Create an independent copy of the board state."""
         new_board = Board(board.size)
         new_board._winner = board._winner
         for i in range(board.size):
@@ -45,21 +53,37 @@ class MCTSNode:
         return new_board
 
     def apply_move(self, move: Move, colour: Colour) -> Board:
-        """ Apply a move to a copy of the board and return it. """
+        """Apply a move to the board copy and return the updated state."""
         new_board = self.copy_board(self.board)
         new_board.tiles[move.x][move.y].colour = colour
         return new_board
 
 
 class MCTSAgent(AgentBase):
+    """
+    A Monte Carlo Tree Search based agent that uses heuristics and caching 
+    to select moves in a game of Hex.
+    """
     _board_size: int = 11
     _colour: Colour
+
+    # Two-bridge patterns defined as offsets from a reference stone:
+    # Each pattern:
+    # ((bridge_x_off, bridge_y_off), (cell1_x_off, cell1_y_off), (cell2_x_off, cell2_y_off))
+    BRIDGE_PATTERNS = [
+        ((-1, -1), (-1, 0), (0, -1)),    # Top-left
+        ((1, -2), (0, -1), (1, -1)),     # Top-right
+        ((2, -1), (1, -1), (1, 0)),      # Right
+        ((1, 1), (1, 0), (0, 1)),        # Bottom-right
+        ((-1, 2), (0, 1), (-1, 1)),      # Bottom-left
+        ((-2, 1), (-1, 1), (-1, 0)),     # Left
+    ]
 
     def __init__(self, colour: Colour):
         super().__init__(colour)
         self._colour = colour
 
-        # Initialize Zobrist hashing
+        # Initialize Zobrist hashing for board states
         random.seed(42)
         self.zobrist_table = {}
         for x in range(self._board_size):
@@ -68,8 +92,25 @@ class MCTSAgent(AgentBase):
                 self.zobrist_table[(x, y, Colour.BLUE)] = random.getrandbits(64)
         self.transposition_table = {}
 
+        # Cache for bridge analysis and other board-related computations
+        self.bridge_cache = {}
+
+        # Weights or parameters (can be tuned)
+        self.weights = {
+            'center_weight': 0.5,
+            'two_bridge_weight': 4.0,
+        }
+
+    def _clear_bridge_cache(self, board: Board):
+        """Clear the cached two-bridge analysis when the board changes."""
+        self.bridge_cache.clear()
+
+    def _get_cache_key(self, board: Board, colour: Colour) -> int:
+        """Generate a cache key from the board state and colour."""
+        return hash((self.hash_board(board), colour))
+
     def get_possible_moves(self, board: Board) -> list[Move]:
-        """Get all valid moves."""
+        """Get all valid moves on the given board."""
         valid_moves = []
         for x in range(board.size):
             for y in range(board.size):
@@ -77,14 +118,16 @@ class MCTSAgent(AgentBase):
                     valid_moves.append(Move(x, y))
         return valid_moves
 
-    def is_my_stone(self, board: Board, move: Move | tuple[int, int]) -> bool:
-        x, y = (move.x, move.y) if isinstance(move, Move) else move
+    def is_my_stone(self, board: Board, position: Move | tuple[int, int]) -> bool:
+        """Check if the given position is occupied by this agent's colour."""
+        x, y = (position.x, position.y) if isinstance(position, Move) else position
         return (0 <= x < board.size and 0 <= y < board.size and
-                board.tiles[x][y].colour is self._colour)
+                board.tiles[x][y].colour == self._colour)
 
-    def check_immediate_win(self, board: Board, move: Move | tuple[int, int], player: Colour) -> bool:
-        x, y = (move.x, move.y) if isinstance(move, Move) else move
-        if not self.is_valid_move(board, (x, y)):
+    def check_immediate_win(self, board: Board, position: Move | tuple[int, int], player: Colour) -> bool:
+        """Check if placing a stone at 'position' immediately wins the game for 'player'."""
+        x, y = (position.x, position.y) if isinstance(position, Move) else position
+        if not self.is_valid_move(board, x, y):
             return False
         board.set_tile_colour(x, y, player)
         won = board.has_ended(player)
@@ -92,15 +135,16 @@ class MCTSAgent(AgentBase):
         return won
 
     def get_all_positions_for_colour(self, board: Board, colour: Colour) -> list[Move]:
+        """Return all positions currently occupied by 'colour'."""
         positions = []
         for x in range(board.size):
             for y in range(board.size):
-                if board.tiles[x][y].colour is colour:
+                if board.tiles[x][y].colour == colour:
                     positions.append(Move(x, y))
         return positions
 
     def copy_board(self, board: Board) -> Board:
-        """Create an efficient copy of the board state."""
+        """Create a copy of the board state."""
         new_board = Board(board.size)
         new_board._winner = board._winner
         for i in range(board.size):
@@ -108,22 +152,24 @@ class MCTSAgent(AgentBase):
                 new_board.tiles[i][j].colour = board.tiles[i][j].colour
         return new_board
 
-    def is_valid_move(self, board: Board, move: Move | tuple[int, int]) -> bool:
-        x, y = (move.x, move.y) if isinstance(move, Move) else move
-        return (0 <= x < board.size and 0 <= y < board.size and
-                board.tiles[x][y].colour is None)
+    def is_valid_move(self, board: Board, x: int, y: int) -> bool:
+        """Check if placing a stone at (x, y) is valid (i.e., tile is empty)."""
+        return 0 <= x < board.size and 0 <= y < board.size and board.tiles[x][y].colour is None
 
     def make_move(self, turn: int, board: Board, opp_move: Move | None) -> Move:
+        """
+        Decide which move to make using MCTS and heuristics.
+        """
         start_time = time.time()
-        max_time = 4.9
+        max_time = 1.9
 
         # Handle opponent swaps
         if opp_move and opp_move.x == -1 and opp_move.y == -1:
             return Move(board.size // 2, board.size // 2)
 
-        # If opponent plays center on their first move
-        if turn == 2 and board.tiles[board.size // 2][board.size // 2].colour is not None:
-            return Move(-1, -1)  # Swap if center is taken
+        # Check swap logic early in the game
+        if turn == 2 and opp_move and self.should_we_swap(opp_move):
+            return Move(-1, -1)
 
         valid_moves = self.get_possible_moves(board)
 
@@ -132,75 +178,74 @@ class MCTSAgent(AgentBase):
             if self.check_immediate_win(board, (move.x, move.y), self._colour):
                 return move
 
-        # Immediate block
+        # Immediate block (if opponent is about to win)
         for move in valid_moves:
             if self.check_immediate_win(board, (move.x, move.y), Colour.opposite(self._colour)):
                 return move
 
-        # Save two-bridge if threatened
+        # Attempt to save threatened two-bridges if possible
         if opp_move:
             save_move = self.save_two_bridge(board, opp_move)
             if save_move:
                 return random.choice(save_move)
-            
-        root = MCTSNode(board)
 
-        # MCTS
+        # MCTS Initialization
+        root = MCTSNode(board)
         iterations = 0
+
+        # Run MCTS until time runs out
         while time.time() - start_time < max_time:
             current_node = self.select_node(root)
             current_node = self.expand_node(current_node)
             result = self.simulate(current_node.board)
             self.backpropagate(current_node, result)
             iterations += 1
-        # print(f"MCTS Iterations: {iterations}, Time Spent: {time.time() - start_time:.2f}s")
 
+        # Choose the move of the child with the highest visit count
         best_child = max(root.children, key=lambda c: c.visits)
         return Move(best_child.move.x, best_child.move.y)
 
     def select_node(self, current_node: MCTSNode) -> MCTSNode:
+        """Selection step of MCTS: navigate down the tree using UCT."""
         while not current_node.unexplored_children and current_node.children:
             current_node = max(current_node.children, key=lambda child: child.calculate_uct_score())
         return current_node
 
     def expand_node(self, node: MCTSNode) -> MCTSNode:
+        """Expansion step of MCTS: expand a node by exploring an unexplored move."""
         if node.unexplored_children:
-            two_bridge_moves = self.get_possible_two_bridges(node.board, self.colour)
-
-            # If two-bridge moves exist, pick one of them first for speed
-            # TODO This is questionable, as it might not always be the best move, will need to evaluate.
-            if two_bridge_moves:
-                # Filter out all two-bridge moves
-                candidate_moves = [m for m in node.unexplored_children if any(m.x == tb.x and m.y == tb.y for tb in two_bridge_moves)]
-                if candidate_moves:
-                    move = random.choice(candidate_moves)
-                else:
-                    move = random.choice(node.unexplored_children)
+            # First, analyze bridges to see if any two-bridge moves are available
+            _, possible_bridges = self.analyze_two_bridges(node.board, self._colour)
+            # If two-bridge moves exist, bias towards them
+            candidate_moves = [m for m in node.unexplored_children if any(m.x == pb.x and m.y == pb.y for pb in possible_bridges)]
+            
+            if candidate_moves:
+                move = random.choice(candidate_moves)
             else:
                 move = random.choice(node.unexplored_children)
 
             node.unexplored_children.remove(move)
-            new_board = node.apply_move(move, self.colour)
+            new_board = node.apply_move(move, self._colour)
             child = MCTSNode(new_board, node, move)
             child.board_hash = self.hash_board(new_board)
-            child.creates_two_bridge = any((move.x == tb.x and move.y == tb.y) for tb in two_bridge_moves)
+            child.creates_two_bridge = any((move.x == pb.x and move.y == pb.y) for pb in possible_bridges)
             node.children.append(child)
             return child
         return node
 
     def simulate(self, state: Board) -> bool:
-        """Run a quick random simulation to the end from the given state."""
-        # Check transposition table
+        """
+        Simulation step of MCTS: Run a random (or semi-random) play-out from the given state.
+        Uses transposition table to avoid repeated calculations.
+        """
         current_hash = self.hash_board(state)
         if current_hash in self.transposition_table:
             return self.transposition_table[current_hash]
 
-        # Simulate on a copy
         simulation_board = self.copy_board(state)
         simulation_colour = self._colour
         moves = self.get_possible_moves(simulation_board)
 
-        # Fast random simulation without intermediate hashing
         while not simulation_board.has_ended(Colour.RED) and not simulation_board.has_ended(Colour.BLUE):
             if not moves:
                 break
@@ -209,11 +254,12 @@ class MCTSAgent(AgentBase):
             moves.remove(move)
             simulation_colour = Colour.opposite(simulation_colour)
 
-        result = (simulation_board._winner == self.colour)
+        result = (simulation_board._winner == self._colour)
         self.transposition_table[current_hash] = result
         return result
 
     def hash_board(self, board: Board) -> int:
+        """Compute Zobrist hash for the current board state."""
         h = 0
         for x in range(board.size):
             for y in range(board.size):
@@ -223,136 +269,220 @@ class MCTSAgent(AgentBase):
         return h
 
     def hash_update(self, hash_val: int, x: int, y: int, color: Colour) -> int:
+        """Update Zobrist hash with a move."""
         return hash_val ^ self.zobrist_table[(x, y, color)]
 
     def backpropagate(self, node: MCTSNode, won: bool):
+        """Backpropagation step of MCTS: update node statistics up the tree."""
         while node:
             node.visits += 1
             if won:
                 node.wins += 1
             node = node.parent
 
+    def analyze_two_bridges(self, board: Board, colour: Colour) -> tuple[list[tuple[Move, tuple[Move, Move]]], list[Move]]:
+        """
+        Analyze the board for two-bridges related to the given colour.
+
+        Returns:
+          existing_bridges: list of tuples (bridge_pos, (empty1, empty2)) where bridge_pos is a Move of an occupied tile 
+                            that forms a two-bridge with two empty cells.
+          possible_bridges: list of Moves representing positions where placing a tile would create a two-bridge.
+        """
+        cache_key = ("analysis", self._get_cache_key(board, colour))
+        if cache_key in self.bridge_cache:
+            return self.bridge_cache[cache_key]
+
+        existing_bridges = []
+        possible_bridges = set()
+        current_positions = self.get_all_positions_for_colour(board, colour)
+
+        for node in current_positions:
+            mx, my = node.x, node.y
+            for (bx_off, by_off), (c1x_off, c1y_off), (c2x_off, c2y_off) in self.BRIDGE_PATTERNS:
+                bx, by = mx + bx_off, my + by_off
+                c1x, c1y = mx + c1x_off, my + c1y_off
+                c2x, c2y = mx + c2x_off, my + c2y_off
+
+                # Check for existing bridge
+                if (self.is_my_stone(board, (bx, by)) and
+                    self.is_valid_move(board, c1x, c1y) and
+                    self.is_valid_move(board, c2x, c2y)):
+                    existing_bridges.append((Move(bx, by), (Move(c1x, c1y), Move(c2x, c2y))))
+
+                # Check for possible two-bridge creation
+                # If placing a stone at (bx, by) plus filling c1 and c2 would form a bridge
+                if (self.is_valid_move(board, bx, by) and
+                    self.is_valid_move(board, c1x, c1y) and
+                    self.is_valid_move(board, c2x, c2y)):
+                    possible_bridges.add(Move(bx, by))
+
+        # Convert possible_bridges to list for consistent return type
+        possible_bridges = list(possible_bridges)
+        self.bridge_cache[cache_key] = (existing_bridges, possible_bridges)
+        return existing_bridges, possible_bridges
+
     def get_possible_two_bridges(self, board: Board, colour: Colour) -> list[Move]:
-        """ Get all possible two-bridge moves. """
-        two_bridges = []
-        current_nodes = self.get_all_positions_for_colour(board, colour)
-
-        # Using the same patterns as before
-        if not current_nodes:
-            return two_bridges
-
-        for node in current_nodes:
-            # Pattern 1: Top-left bridge
-            if (self.is_valid_move(board, (node.x - 1, node.y - 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y)) and
-                self.is_valid_move(board, (node.x, node.y - 1))):
-                two_bridges.append(Move(node.x - 1, node.y - 1))
-
-            # Pattern 2: Top-right bridge
-            if (self.is_valid_move(board, (node.x + 1, node.y - 2)) and
-                self.is_valid_move(board, (node.x, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y - 1))):
-                two_bridges.append(Move(node.x + 1, node.y - 2))
-
-            # Pattern 3: Right bridge
-            if (self.is_valid_move(board, (node.x + 2, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y))):
-                two_bridges.append(Move(node.x + 2, node.y - 1))
-
-            # Pattern 4: Bottom-right bridge
-            if (self.is_valid_move(board, (node.x + 1, node.y + 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y)) and
-                self.is_valid_move(board, (node.x, node.y + 1))):
-                two_bridges.append(Move(node.x + 1, node.y + 1))
-
-            # Pattern 5: Bottom-left bridge
-            if (self.is_valid_move(board, (node.x - 1, node.y + 2)) and
-                self.is_valid_move(board, (node.x, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y + 1))):
-                two_bridges.append(Move(node.x - 1, node.y + 2))
-
-            # Pattern 6: Left bridge
-            if (self.is_valid_move(board, (node.x - 2, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y))):
-                two_bridges.append(Move(node.x - 2, node.y + 1))
-
-        return two_bridges
+        """Get all possible moves that could create a two-bridge if placed."""
+        _, possible_bridges = self.analyze_two_bridges(board, colour)
+        return possible_bridges
 
     def get_two_bridges_with_positions(self, board: Board, colour: Colour) -> list[tuple[Move, tuple[Move, Move]]]:
-        two_bridges = []
-        current_nodes = self.get_all_positions_for_colour(board, colour)
+        """Get all existing two-bridges along with the exact empty cells they depend on."""
+        existing_bridges, _ = self.analyze_two_bridges(board, colour)
+        return existing_bridges
 
-        for node in current_nodes:
-            # Pattern 1: Top-left bridge
-            if (self.is_my_stone(board, (node.x - 1, node.y - 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y)) and
-                self.is_valid_move(board, (node.x, node.y - 1))):
-                two_bridges.append(((node.x - 1, node.y - 1),
-                                    (Move(node.x - 1, node.y), Move(node.x, node.y - 1))))
-
-            # Pattern 2: Top-right bridge
-            if (self.is_my_stone(board, (node.x + 1, node.y - 2)) and
-                self.is_valid_move(board, (node.x, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y - 1))):
-                two_bridges.append(((node.x + 1, node.y - 2),
-                                    (Move(node.x, node.y - 1), Move(node.x + 1, node.y - 1))))
-
-            # Pattern 3: Right bridge
-            if (self.is_my_stone(board, (node.x + 2, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y - 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y))):
-                two_bridges.append(((node.x + 2, node.y - 1),
-                                    (Move(node.x + 1, node.y - 1), Move(node.x + 1, node.y))))
-
-            # Pattern 4: Bottom-right bridge
-            if (self.is_my_stone(board, (node.x + 1, node.y + 1)) and
-                self.is_valid_move(board, (node.x + 1, node.y)) and
-                self.is_valid_move(board, (node.x, node.y + 1))):
-                two_bridges.append(((node.x + 1, node.y + 1),
-                                    (Move(node.x + 1, node.y), Move(node.x, node.y + 1))))
-
-            # Pattern 5: Bottom-left bridge
-            if (self.is_my_stone(board, (node.x - 1, node.y + 2)) and
-                self.is_valid_move(board, (node.x, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y + 1))):
-                two_bridges.append(((node.x - 1, node.y + 2),
-                                    (Move(node.x, node.y + 1), Move(node.x - 1, node.y + 1))))
-
-            # Pattern 6: Left bridge
-            if (self.is_my_stone(board, (node.x - 2, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y + 1)) and
-                self.is_valid_move(board, (node.x - 1, node.y))):
-                two_bridges.append(((node.x - 2, node.y + 1),
-                                    (Move(node.x - 1, node.y + 1), Move(node.x - 1, node.y))))
-
-        return two_bridges
-
-    def save_two_bridge(self, board: Board, opp_move: Move) -> Move | None:
+    def save_two_bridge(self, board: Board, opp_move: Move) -> list[Move] | None:
+        """
+        Attempt to save a threatened two-bridge after the opponent's move.
+        
+        Steps:
+        1. Capture current existing bridges.
+        2. Temporarily remove opponent's move and re-check bridges.
+        3. Restore move and find which bridges were lost.
+        4. Identify moves that can restore these lost bridges.
+        """
         x, y = opp_move.x, opp_move.y
+        original_color = board.tiles[x][y].colour
+
+        # Current existing bridges
+        current_existing, _ = self.analyze_two_bridges(board, self._colour)
+        current_bridge_positions = {bridge[0] for bridge in current_existing}
+
+        # Temporarily remove opponent's move
+        board.set_tile_colour(x, y, None)
+        self._clear_bridge_cache(board)
+
+        # Bridges before opponent's move
+        previous_existing, _ = self.analyze_two_bridges(board, self._colour)
+
+        # Restore opponent's move
+        board.set_tile_colour(x, y, original_color)
+        self._clear_bridge_cache(board)
+
         moves_to_save = set()
 
-        original_color = board.tiles[x][y].colour
-        current_bridges = self.get_two_bridges_with_positions(board, self._colour)
-
-        # Temporarily undo opponent's move
-        board.set_tile_colour(x, y, None)
-
-        previous_bridges = self.get_two_bridges_with_positions(board, self._colour)
-
-        # Restore
-        board.set_tile_colour(x, y, original_color)
-
-        # Check each bridge that existed before
-        current_bridge_positions = [b[0] for b in current_bridges]
-
-        for bridge_pos, empty_cells in previous_bridges:
+        # Find bridges that existed before but not now -> threatened
+        for bridge_pos, empty_cells in previous_existing:
             if bridge_pos not in current_bridge_positions:
                 cell1, cell2 = empty_cells
-                if (x, y) == (cell1.x, cell1.y) and self.is_valid_move(board, (cell2.x, cell2.y)):
+                # Identify which cell was taken by the opponent and try to save with the other
+                if (x, y) == (cell1.x, cell1.y) and self.is_valid_move(board, cell2.x, cell2.y):
                     moves_to_save.add(Move(cell2.x, cell2.y))
-                elif (x, y) == (cell2.x, cell2.y) and self.is_valid_move(board, (cell1.x, cell1.y)):
+                elif (x, y) == (cell2.x, cell2.y) and self.is_valid_move(board, cell1.x, cell1.y):
                     moves_to_save.add(Move(cell1.x, cell1.y))
 
         return list(moves_to_save) if moves_to_save else None
+
+    def should_we_swap(self, opp_move: Move) -> bool:
+        """
+        Determine if we should initiate a 'swap' based on known strategies.
+        """
+        # Pre-defined moves where swapping is considered advantageous
+        swap_moves = []
+        for x in range(2, 9):
+            for y in range(11):
+                # Avoid certain corners
+                if not (x == 2 and y == 0) and not (x == 8 and y == 0) \
+                   and not (x == 2 and y == 10) and not (x == 8 and y == 10):
+                    swap_moves.append(Move(x, y))
+        
+        # Additional known good swap moves
+        swap_moves.extend([
+            Move(0, 10), Move(1, 9), Move(1, 10),
+            Move(9, 0), Move(10, 0), Move(9, 1)
+        ])
+
+        # On turn 2, if agent is BLUE and the opponent's move matches a swap configuration
+        if opp_move is not None and self._colour == Colour.BLUE:
+            if opp_move in swap_moves:
+                return True
+        return False
+    
+    
+    # NEW METHODS
+    
+    def bridge_direction(self, bridge: tuple[Move, tuple[Move, Move], Move]) -> str:
+        """ Returns the direction of a bridge. Vertical if going up/down, horizontal if left/right, diagonal if in between. """
+        bridge_pos1, _, bridge_pos2 = bridge
+
+        if abs(bridge_pos1.x - bridge_pos2.x) >= 2:
+            return "vertical"
+        elif abs(bridge_pos1.y - bridge_pos2.y) >= 2:
+            return "horizontal"
+        else:
+            return "diagonal"
+        
+        
+    def get_two_bridges_score(self, board: Board, move: Move) -> float:
+        """ 
+        Return a "two bridge" score that is calculated based on:
+            +parallel_two_bridge_weight for each two bridge created by making the given move in the intended direction (e.g. top-bottom or left-right). 
+
+            +perpendicular_two_bridge_weight for each two bridge created by making the given move in the unintended direction 
+            (e.g. top-bottom or left-right). This is less than parallel_two_bridge_weight, but still better than a random move.
+
+            +diagonal_two_bridge_weight for each two bridge created by making the given move in the middle of the intended and 
+            unintended direction. This is less than parallel_two_bridge_weight, but better than perpendicular_two_bridge_weight.
+
+            +opponent_bridge_block for every opponent two bridge that is blocked by the given move.
+
+        The more two bridges, the better the move. The more opponent two 
+        bridges that are blocked, the better the move.
+
+        A move will have a higher score if it creates multiple two bridges.
+
+        This function assumes move is a valid move.
+        """
+
+        two_bridges_score = 0
+
+        # Creates a two bridge for current player
+        player_bridges = self.get_two_bridges(board, self._colour, move)
+        for bridge in player_bridges:
+            if (self._colour == Colour.RED and self.bridge_direction(bridge) == 'vertical') or \
+               (self._colour == Colour.BLUE and self.bridge_direction(bridge) == 'horizontal'):
+                # Greatest weighting for parallel bridges (those that travel the furthest in the intended direction)
+                two_bridges_score += self.weights['parallel_two_bridge_weight']
+            elif (self._colour == Colour.RED and self.bridge_direction(bridge) == 'horizontal') or \
+               (self._colour == Colour.BLUE and self.bridge_direction(bridge) == 'vertical'):
+                # Least weighting for perpendicular bridges (those that travel the furthest in the unintended direction)
+                two_bridges_score += self.weights['perpendicular_two_bridge_weight']
+            else:
+                # Slightly less weighting for diagonal bridges (those that move left/right in the intended direction)
+                two_bridges_score += self.weights['diagonal_two_bridge_weight']
+
+        # Blocks opponent two bridges
+        # This is not worth as much as prioritising our own bridges
+        opponent = self._colour.opposite()
+        two_bridges_score += (len(self.get_two_bridges(board, opponent, move)) * self.weights['opponent_bridge_block'])
+
+        return two_bridges_score
+    
+    def evaluate_move(self, board: Board, move: Move | tuple[int, int]) -> float:
+        """ 
+        Evaluates the quality of a given move. 
+        
+        Returns a score where a higher score represents a better move.
+        """
+
+        score = 0  # Initialize score
+        x, y = (move.x, move.y) if isinstance(move, Move) else move
+        center = board.size // 2
+        
+        # Prioritise moves closer to the center
+        dist_to_center = abs(x - center) + abs(y - center)
+        score += (max(0, (board.size - dist_to_center)) / board.size) * self.weights['center_weight']
+
+        # Prioritise moves that make or block two bridges
+        two_bridge_score = self.get_two_bridge_score(board, move)
+        score += two_bridge_score
+
+        # Prioritise moves that connect tiles
+        connection_score = self.get_connection_score(board, move)
+        score += connection_score
+
+        return score
+    
+    
+    

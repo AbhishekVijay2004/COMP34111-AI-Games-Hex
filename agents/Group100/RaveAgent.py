@@ -60,7 +60,7 @@ class MCTSAgent(AgentBase):
             'center_weight': 1.403,  # Moves closer to the center are prioritised
             'neighbour_weight': 0.943,
             'bridge_weight': 0.943,
-            'edge_weight': 0.943,
+            'edge_weight': 0.943,  # Moves closer to the edge are prioritised
             'defensive_weight': 6.420,
             'connection_weight': 2.5,  # Moves that connect tiles
             'parallel_two_bridge_weight': 6.421,  # Moves that create two bridges in the intended direction
@@ -96,7 +96,7 @@ class MCTSAgent(AgentBase):
                     valid_moves.append(Move(x, y))
         return valid_moves
     
-    def get_smart_moves(self, board: Board) -> list[Move]:
+    def get_smart_moves(self, board: Board, player: Colour) -> list[Move]:
         """
         Return an ordered list of valid moves such that the first entry is the best move. 
         
@@ -106,7 +106,7 @@ class MCTSAgent(AgentBase):
 
         # Sort the moves by their evaluation score
         smart_moves = sorted(valid_moves, 
-                                key=lambda move: self.evaluate_move(board, move), 
+                                key=lambda move: self.evaluate_move(board, move, player), 
                                 reverse=True)
         
         return smart_moves
@@ -116,7 +116,7 @@ class MCTSAgent(AgentBase):
         x, y = (move.x, move.y) if isinstance(move, Move) else move
         return (0 <= x < board.size and 0 <= y < board.size and
                 board.tiles[x][y].colour is self._colour)
-    
+     
     def is_opponent_tile(self, board: Board, move: Move | tuple[int, int]) -> bool:
         """ Returns True if the given move is an opponent tile, False otherwise. """
         x, y = (move.x, move.y) if isinstance(move, Move) else move
@@ -133,22 +133,34 @@ class MCTSAgent(AgentBase):
                     neighbours.append(Move(x + dx, y + dy))
         return neighbours
     
-    def is_neighbour(self, move1: Move | tuple[int, int], move2: Move | tuple[int, int]) -> bool:
-        """ Returns True if the two given moves are neighbours, False otherwise. """
+    def are_tiles_connected(self, board: Board, move1: Move | tuple[int, int], move2: Move | tuple[int, int]) -> bool:
+        """ Returns True if the two given moves are connected, False otherwise. 
+
+            Finds a path using depth-first search that connects move1 to move2.
+        """
         x1, y1 = (move1.x, move1.y) if isinstance(move1, Move) else move1
         x2, y2 = (move2.x, move2.y) if isinstance(move2, Move) else move2
 
-        move1_relative_neighbors_positions = [
-            (x1 - 1, y1),
-            (x1 + 1, y1),
-            (x1 - 1, y1 + 1),
-            (x1 + 1, y1 + 1),
-            (x1, y1 - 1),
-            (x1, y1 + 1),
-        ]
+        visited = [[False for _ in range(board.size)] for _ in range(board.size)]
+        stack = [(x1, y1)]
 
-        # Return True if move2 is in the list of relative neighbours of move1
-        return (x2, y2) in move1_relative_neighbors_positions
+        while stack:
+            # x, y are temp variables that represent our current location in the path finding
+            x, y = stack.pop()
+
+            # If we have found a path, return True
+            if x == x2 and y == y2:
+                return True
+            if visited[x][y]:
+                continue
+            visited[x][y] = True
+
+            for dx, dy in [(1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)]:
+                if 0 <= x + dx < board.size and 0 <= y + dy < board.size:
+                    if self.is_my_tile(board, (x + dx, y + dy)):
+                        stack.append((x + dx, y + dy))
+
+        return False
 
     def check_immediate_win(self, board: Board, move: Move | tuple[int, int], player: Colour) -> bool:
         x, y = (move.x, move.y) if isinstance(move, Move) else move
@@ -181,7 +193,7 @@ class MCTSAgent(AgentBase):
         return (0 <= x < board.size and 0 <= y < board.size and
                 board.tiles[x][y].colour is None)
     
-    def evaluate_move(self, board: Board, move: Move | tuple[int, int]) -> float:
+    def evaluate_move(self, board: Board, move: Move | tuple[int, int], player: Colour) -> float:
         """ 
         Evaluates the quality of a given move. 
         
@@ -195,6 +207,12 @@ class MCTSAgent(AgentBase):
         # Prioritise moves closer to the center
         dist_to_center = abs(x - center) + abs(y - center)
         score += (max(0, (board.size - dist_to_center)) / board.size) * self.weights['center_weight']
+
+        # Pioritise moves that connect to our edge
+        if player == Colour.RED and (x == 0 or x == board.size-1):
+            score += self.weights['edge_weight']
+        elif player == Colour.BLUE and (y == 0 or y == board.size-1):
+            score += self.weights['edge_weight']
 
         # Prioritise moves that make or block two bridges
         two_bridge_score = self.get_two_bridges_score(board, move)
@@ -290,7 +308,7 @@ class MCTSAgent(AgentBase):
         if node.unexplored_children:
             # Re-evaluate all unexplored_children so that the best move is always chosen
             node.unexplored_children = sorted(node.unexplored_children, 
-                                                key=lambda move: self.evaluate_move(node.board, move), 
+                                                key=lambda move: self.evaluate_move(node.board, move, self._colour), 
                                                 reverse=True)
             move = node.unexplored_children.pop(0)  # The first move is always the best
             new_board = node.apply_move(move, self._colour)
@@ -310,7 +328,7 @@ class MCTSAgent(AgentBase):
         # Simulate on a copy
         simulation_board = self.copy_board(state)
         simulation_colour = self._colour
-        moves = self.get_smart_moves(simulation_board)
+        moves = self.get_smart_moves(simulation_board, simulation_colour)
 
         # Fast random simulation without intermediate hashing
         while not simulation_board.has_ended(Colour.RED) and not simulation_board.has_ended(Colour.BLUE):
@@ -505,8 +523,8 @@ class MCTSAgent(AgentBase):
         for pair in neighbour_pairs:
             n1, n2 = pair
 
-            # If n1 and n2 are not already neighbours, then adding the move will connect them
-            if not self.is_neighbour(n1, n2):
+            # If n1 and n2 are not already connected, then adding the move will connect them
+            if not self.are_tiles_connected(board, n1, n2):
                 connection_score += self.weights['connection_weight']
 
         return connection_score
@@ -517,6 +535,8 @@ class MCTSAgent(AgentBase):
         
         This function searches the whole board and finds two bridges that are threatened 
         by the opponent, and then returns a list of moves that can save them.
+
+        It will not save two bridges where the nodes are already connected via some other route. This is a wasted move.
         """
 
         saving_moves = []
@@ -528,72 +548,84 @@ class MCTSAgent(AgentBase):
                     if (self.is_my_tile(board, (x - 1, y - 1)) and 
                         self.is_opponent_tile(board, (x - 1, y)) and 
                         self.is_valid_move(board, (x, y - 1))):
-                        saving_moves.append(Move(x, y - 1))
+                        if not self.are_tiles_connected(board, (x, y), (x - 1, y - 1)):
+                            saving_moves.append(Move(x, y - 1))
                     
                     # Pattern 1: Top-left bridge
                     if (self.is_my_tile(board, (x - 1, y - 1)) and 
                         self.is_valid_move(board, (x - 1, y)) and 
                         self.is_opponent_tile(board, (x, y - 1))):
-                        saving_moves.append(Move(x - 1, y))
+                        if not self.are_tiles_connected(board, (x, y), (x - 1, y - 1)):
+                            saving_moves.append(Move(x - 1, y))
 
                     # Pattern 2: Top-right bridge
                     if (self.is_my_tile(board, (x + 1, y - 2)) and
                         self.is_opponent_tile(board, (x, y - 1)) and
                         self.is_valid_move(board, (x + 1, y - 1))):
-                        saving_moves.append(Move(x + 1, y - 1))
+                        if not self.are_tiles_connected(board, (x, y), (x + 1, y - 2)):
+                            saving_moves.append(Move(x + 1, y - 1))
 
                     # Pattern 2: Top-right bridge
                     if (self.is_my_tile(board, (x + 1, y - 2)) and
                         self.is_valid_move(board, (x, y - 1)) and
                         self.is_opponent_tile(board, (x + 1, y - 1))):
-                        saving_moves.append(Move(x, y - 1))
+                        if not self.are_tiles_connected(board, (x, y), (x + 1, y - 2)):
+                            saving_moves.append(Move(x, y - 1))
 
                     # Pattern 3: Right bridge
                     if (self.is_my_tile(board, (x + 2, y - 1)) and
                         self.is_opponent_tile(board, (x + 1, y - 1)) and
                         self.is_valid_move(board, (x + 1, y))):
-                        saving_moves.append(Move(x + 1, y))
+                        if not self.are_tiles_connected(board, (x, y), (x + 2, y - 1)):
+                            saving_moves.append(Move(x + 1, y))
 
                     # Pattern 3: Right bridge
                     if (self.is_my_tile(board, (x + 2, y - 1)) and
                         self.is_valid_move(board, (x + 1, y - 1)) and
                         self.is_opponent_tile(board, (x + 1, y))):
-                        saving_moves.append(Move(x + 1, y - 1))
+                        if not self.are_tiles_connected(board, (x, y), (x + 2, y - 1)):
+                            saving_moves.append(Move(x + 1, y - 1))
 
                     # Pattern 4: Bottom-right bridge
                     if (self.is_my_tile(board, (x + 1, y + 1)) and
                         self.is_opponent_tile(board, (x + 1, y)) and
                         self.is_valid_move(board, (x, y + 1))):
-                        saving_moves.append(Move(x, y + 1))
+                        if not self.are_tiles_connected(board, (x, y), (x + 1, y + 1)):
+                            saving_moves.append(Move(x, y + 1))
 
                     # Pattern 4: Bottom-right bridge
                     if (self.is_my_tile(board, (x + 1, y + 1)) and
                         self.is_valid_move(board, (x + 1, y)) and
                         self.is_opponent_tile(board, (x, y + 1))):
-                        saving_moves.append(Move(x + 1, y))
+                        if not self.are_tiles_connected(board, (x, y), (x + 1, y + 1)):
+                            saving_moves.append(Move(x + 1, y))
 
                     # Pattern 5: Bottom-left bridge
                     if (self.is_my_tile(board, (x - 1, y + 2)) and
                         self.is_opponent_tile(board, (x, y + 1)) and
                         self.is_valid_move(board, (x - 1, y + 1))):
-                        saving_moves.append(Move(x - 1, y + 1))
+                        if not self.are_tiles_connected(board, (x, y), (x - 1, y + 2)):
+                            saving_moves.append(Move(x - 1, y + 1))
 
                     # Pattern 5: Bottom-left bridge
                     if (self.is_my_tile(board, (x - 1, y + 2)) and
                         self.is_valid_move(board, (x, y + 1)) and
                         self.is_opponent_tile(board, (x - 1, y + 1))):
-                        saving_moves.append(Move(x, y + 1))
+                        if not self.are_tiles_connected(board, (x, y), (x - 1, y + 2)):
+                            saving_moves.append(Move(x, y + 1))
 
                     # Pattern 6: Left bridge
                     if (self.is_my_tile(board, (x - 2, y + 1)) and
                         self.is_opponent_tile(board, (x - 1, y + 1)) and
                         self.is_valid_move(board, (x - 1, y))):
-                        saving_moves.append(Move(x - 1, y))
+                        if not self.are_tiles_connected(board, (x, y), (x - 2, y + 1)):
+                            saving_moves.append(Move(x - 1, y))
 
                     # Pattern 6: Left bridge
                     if (self.is_my_tile(board, (x - 2, y + 1)) and
                         self.is_valid_move(board, (x - 1, y + 1)) and
                         self.is_opponent_tile(board, (x - 1, y))):
-                        saving_moves.append(Move(x - 1, y + 1))
+                        if not self.are_tiles_connected(board, (x, y), (x - 2, y + 1)):
+                            saving_moves.append(Move(x - 1, y + 1))
 
         return saving_moves

@@ -264,25 +264,52 @@ class MCTSAgent(AgentBase):
 
     def light_playout_score(self, board: Board, move: Move, colour: Colour) -> float:
         """Quick heuristic score for simulation phase."""
-        score = 1.0  # Base score
+        score = 1.0
         center = board.size // 2
         
-        # Center proximity bonus (0 to 0.5)
+        # Edge penalty (-0.2) but ignore if connected to friendly stone
+        if move.x == 0 or move.x == board.size-1 or move.y == 0 or move.y == board.size-1:
+            has_friendly = False
+            for dx, dy in self.NEIGHBOR_PATTERNS:
+                nx, ny = move.x + dx, move.y + dy
+                if 0 <= nx < board.size and 0 <= ny < board.size:
+                    if board.tiles[nx][ny].colour == colour:
+                        has_friendly = True
+                        break
+            if not has_friendly:
+                score -= 0.2
+
+        # Center proximity (scaled down to 0.3 max to balance with other factors)
         dist_to_center = abs(move.x - center) + abs(move.y - center)
-        score += 0.5 * (1.0 - dist_to_center / board.size)
+        score += 0.3 * (1.0 - dist_to_center / board.size)
         
-        # Check immediate neighbors
+        # Quick bridge pattern check (diagonal connections)
+        bridge_bonus = 0.0
+        for dx, dy in [(1,1), (1,-1), (-1,1), (-1,-1)]:
+            bridge_x, bridge_y = move.x + dx*2, move.y + dy*2
+            middle_x, middle_y = move.x + dx, move.y + dy
+            if (0 <= bridge_x < board.size and 0 <= bridge_y < board.size and
+                0 <= middle_x < board.size and 0 <= middle_y < board.size):
+                if (board.tiles[bridge_x][bridge_y].colour == colour and
+                    board.tiles[middle_x][middle_y].colour is None):
+                    bridge_bonus = 0.8
+                    break
+        score += bridge_bonus
+        
+        # Basic connectivity to friendly stones (reduced weight from original)
+        friendly_connections = 0
         for dx, dy in self.NEIGHBOR_PATTERNS:
             nx, ny = move.x + dx, move.y + dy
             if 0 <= nx < board.size and 0 <= ny < board.size:
                 if board.tiles[nx][ny].colour == colour:
-                    score += 0.5  # Connected to friendly stone
+                    friendly_connections += 1
+        score += 0.3 * friendly_connections
         
-        # Directional bonus
+        # Directional bonus (kept from original but slightly reduced)
         if colour == Colour.RED and abs(move.x - center) < abs(move.y - center):
-            score += 0.3  # Prefer vertical progress for RED
+            score += 0.2
         elif colour == Colour.BLUE and abs(move.y - center) < abs(move.x - center):
-            score += 0.3  # Prefer horizontal progress for BLUE
+            score += 0.2
             
         return score
 
@@ -431,4 +458,3 @@ class MCTSAgent(AgentBase):
             if opp_move in swap_moves:
                 return True
         return False
-  

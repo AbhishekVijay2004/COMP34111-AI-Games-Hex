@@ -93,6 +93,25 @@ class MCTSAgent(AgentBase):
         ((-1, 2), (0, 1), (-1, 1)),      # Bottom-left
         ((-2, 1), (-1, 1), (-1, 0)),     # Left
     ]
+    
+    
+    DIRECTION_VERTICAL = "vertical"
+    DIRECTION_HORIZONTAL = "horizontal"
+    DIRECTION_DIAGONAL = "diagonal"
+
+    # Pre-computed neighbor patterns as (x_offset, y_offset) from the center tile
+    # In Hex, each tile has 6 neighbors in this pattern:
+    #    NW  NE
+    #  W   *   E
+    #    SW  SE
+    NEIGHBOR_PATTERNS = [
+        (-1, 0),   # West
+        (1, 0),    # East
+        (0, -1),   # Northwest
+        (1, -1),   # Northeast
+        (-1, 1),   # Southwest
+        (0, 1),    # Southeast
+    ]
 
     def __init__(self, colour: Colour):
         super().__init__(colour)
@@ -110,9 +129,21 @@ class MCTSAgent(AgentBase):
         self.bridge_cache = {}
 
         self.weights = {
-            'center_weight': 0.5,
-            'two_bridge_weight': 4.0,
+            'center_weight': 0.4,  # Reduced center weight
+            'opponent_bridge_block': 3.0,
+            'parallel_two_bridge_weight': 6.0,  # Increased bridge weights
+            'perpendicular_two_bridge_weight': 4.0,
+            'diagonal_two_bridge_weight': 5.0,
+            'friendly_neighbour': 0.5,     # Friendly neighbors are good
+            'enemy_neighbour': -0.8,       # Enemy neighbors are very bad
+            'empty_neighbour': 0.3,        # Empty neighbors provide opportunity
+            'direction_bonus': 0.4        # Bonus for neighbors in winning direction
         }
+        
+        
+        self.neighbor_cache = {}  # Cache for get_neighbors results
+        self.evaluation_cache = {}  # Cache for move evaluations
+        self.max_cache_size = 10000  # Prevent memory issues
 
     def _clear_bridge_cache(self, board: Board):
         self.bridge_cache.clear()
@@ -163,7 +194,8 @@ class MCTSAgent(AgentBase):
 
     def make_move(self, turn: int, board: Board, opp_move: Move | None) -> Move:
         start_time = time.time()
-        max_time = 1.9
+        max_time = 9
+        
 
         # Check swap logic early in the game
         if turn == 2 and opp_move and self.should_we_swap(opp_move):
@@ -200,6 +232,7 @@ class MCTSAgent(AgentBase):
 
         # Choose best move by visits
         best_child = max(root.children, key=lambda c: c.visits)
+        # print("time taken", time.time() - start_time, "iterations", iterations)
         return Move(best_child.move.x, best_child.move.y)
 
     def select_node(self, current_node: MCTSNode) -> MCTSNode:
@@ -211,6 +244,7 @@ class MCTSAgent(AgentBase):
     def expand_node(self, node: MCTSNode) -> MCTSNode:
         """Expand a node by exploring an unexplored move."""
         if node.unexplored_children:
+            
             _, possible_bridges = self.analyze_two_bridges(node.board, self._colour)
             candidate_moves = [m for m in node.unexplored_children if any(m.x == pb.x and m.y == pb.y for pb in possible_bridges)]
 
@@ -223,19 +257,39 @@ class MCTSAgent(AgentBase):
             new_board = node.apply_move(move, self._colour)
             child = MCTSNode(new_board, node, move)
             child.board_hash = self.hash_board(new_board)
-            child.creates_two_bridge = any((move.x == pb.x and move.y == pb.y) for pb in possible_bridges)
+            # child.creates_two_bridge = any((move.x == pb.x and move.y == pb.y) for pb in possible_bridges)
             node.children.append(child)
             return child
         return node
 
+    def light_playout_score(self, board: Board, move: Move, colour: Colour) -> float:
+        """Quick heuristic score for simulation phase."""
+        score = 1.0  # Base score
+        center = board.size // 2
+        
+        # Center proximity bonus (0 to 0.5)
+        dist_to_center = abs(move.x - center) + abs(move.y - center)
+        score += 0.5 * (1.0 - dist_to_center / board.size)
+        
+        # Check immediate neighbors
+        for dx, dy in self.NEIGHBOR_PATTERNS:
+            nx, ny = move.x + dx, move.y + dy
+            if 0 <= nx < board.size and 0 <= ny < board.size:
+                if board.tiles[nx][ny].colour == colour:
+                    score += 0.5  # Connected to friendly stone
+        
+        # Directional bonus
+        if colour == Colour.RED and abs(move.x - center) < abs(move.y - center):
+            score += 0.3  # Prefer vertical progress for RED
+        elif colour == Colour.BLUE and abs(move.y - center) < abs(move.x - center):
+            score += 0.3  # Prefer horizontal progress for BLUE
+            
+        return score
+
     def simulate(self, state: Board) -> tuple[list[Move], bool]:
-        """
-        Run a random simulation to a terminal state.
-        Return the moves played and the result (win or loss).
-        """
+        """Run a simulation with light playout policy."""
         current_hash = self.hash_board(state)
         if current_hash in self.transposition_table:
-            # We don't have a record of played moves for cached results, so return empty list
             return [], self.transposition_table[current_hash]
 
         simulation_board = self.copy_board(state)
@@ -246,7 +300,25 @@ class MCTSAgent(AgentBase):
         while not simulation_board.has_ended(Colour.RED) and not simulation_board.has_ended(Colour.BLUE):
             if not moves:
                 break
-            move = random.choice(moves)
+
+          
+            if random.random() < 0.8:  # 80% chance to use heuristic
+                scored_moves = [(m, self.light_playout_score(simulation_board, m, simulation_colour)) 
+                                  for m in moves[:min(len(moves), 8)]]  # Limit number of moves to evaluate
+                total_score = sum(score for _, score in scored_moves)
+                if total_score > 0:
+                    r = random.random() * total_score
+                    cum_score = 0
+                    for m, score in scored_moves:
+                        cum_score += score
+                        if cum_score >= r:
+                            move = m
+                            break
+                else:
+                    move = random.choice(moves)
+            else:
+                move = random.choice(moves)  # Pure random 20% of the time
+
             simulation_board.set_tile_colour(move.x, move.y, simulation_colour)
             played_moves.append((move, simulation_colour))
             moves.remove(move)
@@ -359,3 +431,4 @@ class MCTSAgent(AgentBase):
             if opp_move in swap_moves:
                 return True
         return False
+  

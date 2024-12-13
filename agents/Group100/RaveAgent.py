@@ -27,6 +27,11 @@ class MCTSNode:
         self.amaf_wins = {}
         self.amaf_visits = {}
 
+        # Add priority score for move ordering
+        self.priority_score = 0
+        # Add pattern database stats
+        self.pattern_count = 0
+
     def get_possible_moves(self, board: Board) -> list[Move]:
         """Get all valid moves at the current state."""
         valid_moves = []
@@ -45,16 +50,19 @@ class MCTSNode:
         if child.visits == 0:
             return float('inf')
 
+
+        # Modified UCT formula with pattern recognition
+        exploitation = (child.wins / child.visits) 
+
         # UCT part
-        exploitation = child.wins / child.visits
-        exploration = sqrt((2 * log(self.visits)) / child.visits)
+        exploration = sqrt(( log(self.visits)) / child.visits)
         uct_value = exploitation + c_param * exploration
 
         # RAVE part
         move_key = (child.move.x, child.move.y)
         amaf_w = self.amaf_wins.get(move_key, 0)
         amaf_v = self.amaf_visits.get(move_key, 0)
-        amaf_value = (amaf_w / amaf_v) if amaf_v > 0 else 0.5
+        amaf_value = (amaf_w / amaf_v) if amaf_v > 0 else 0.0
 
         # Combine UCT and RAVE
         beta = sqrt(rave_equivalence / (3 * self.visits + rave_equivalence))
@@ -145,6 +153,19 @@ class MCTSAgent(AgentBase):
         self.evaluation_cache = {}  # Cache for move evaluations
         self.max_cache_size = 10000  # Prevent memory issues
 
+        # Add pattern database
+        self.pattern_db = {
+            'bridge': [(0,1), (1,1)],
+            'ladder': [(1,0), (1,1), (2,1)],
+            'triangle': [(1,0), (1,1), (0,1)]
+        }
+        
+        # Early game book
+        self.opening_moves = {
+            1: [Move(5,5)],  # Center
+            3: [Move(4,4), Move(6,6)]  # Near center responses
+        }
+
     def _clear_bridge_cache(self, board: Board):
         self.bridge_cache.clear()
 
@@ -194,12 +215,16 @@ class MCTSAgent(AgentBase):
 
     def make_move(self, turn: int, board: Board, opp_move: Move | None) -> Move:
         start_time = time.time()
-        max_time = 9
+        max_time = 3.9
         
 
         # Check swap logic early in the game
         if turn == 2 and opp_move and self.should_we_swap(opp_move):
             return Move(-1, -1)
+
+        # Check opening book
+        if turn in self.opening_moves:
+            return random.choice(self.opening_moves[turn])
 
         valid_moves = self.get_possible_moves(board)
 
@@ -329,9 +354,10 @@ class MCTSAgent(AgentBase):
                 break
 
           
-            if random.random() < 0.8:  # 80% chance to use heuristic
-                scored_moves = [(m, self.light_playout_score(simulation_board, m, simulation_colour)) 
-                                  for m in moves[:min(len(moves), 8)]]  # Limit number of moves to evaluate
+            if random.random() < 0.9:  # Increase heuristic probability
+                scored_moves = [(m, self.light_playout_score(simulation_board, m, simulation_colour) + 
+                               self.pattern_score(simulation_board, m, simulation_colour))
+                               for m in moves[:min(len(moves), 12)]]  # Evaluate more moves
                 total_score = sum(score for _, score in scored_moves)
                 if total_score > 0:
                     r = random.random() * total_score
@@ -354,6 +380,24 @@ class MCTSAgent(AgentBase):
         result = (simulation_board._winner == self._colour)
         self.transposition_table[current_hash] = result
         return played_moves, result
+
+    def pattern_score(self, board: Board, move: Move, colour: Colour) -> float:
+        """Calculate pattern-based score for a move."""
+        score = 0
+        for pattern_name, offsets in self.pattern_db.items():
+            if self.matches_pattern(board, move, colour, offsets):
+                score += 0.5
+        return score
+
+    def matches_pattern(self, board: Board, move: Move, colour: Colour, offsets: list) -> bool:
+        """Check if a move matches a known pattern."""
+        for dx, dy in offsets:
+            x, y = move.x + dx, move.y + dy
+            if not (0 <= x < board.size and 0 <= y < board.size):
+                return False
+            if board.tiles[x][y].colour != colour:
+                return False
+        return True
 
     def hash_board(self, board: Board) -> int:
         h = 0

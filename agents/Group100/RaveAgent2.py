@@ -304,6 +304,10 @@ class MCTSAgent(AgentBase):
 
         self.get_possible_moves(board)
 
+        # Strategic starting move, place at (0,2) if we are starting
+        if turn == 1: 
+            return Move(0, 2)
+
         # Strategic swap evaluation - should we swap?
         if turn == 2 and self.should_we_swap(opp_move):
             return Move(-1, -1)

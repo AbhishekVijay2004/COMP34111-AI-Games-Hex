@@ -227,6 +227,10 @@ class MCTSAgent(AgentBase):
         inferiority_score = self.get_inferiority_score(board, move)
         score -= inferiority_score
 
+        # Add defensive score
+        defensive_score = self.evaluate_defensive_position(board, move)
+        score += defensive_score
+
         return score
     
     def evaluate_defensive_position(self, board: Board, move: tuple[int, int]) -> float:

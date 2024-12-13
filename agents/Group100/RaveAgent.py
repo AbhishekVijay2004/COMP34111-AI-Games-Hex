@@ -222,6 +222,10 @@ class MCTSAgent(AgentBase):
         connection_score = self.get_connection_score(board, move)
         score += connection_score
 
+        # Penalise moves that are surrounded by opponent's tiles
+        inferiority_score = self.get_inferiority_score(board, move)
+        score -= inferiority_score
+
         return score
     
     def should_we_swap(self, opp_move: Move) -> bool:
@@ -528,6 +532,27 @@ class MCTSAgent(AgentBase):
                 connection_score += self.weights['connection_weight']
 
         return connection_score
+    
+    def get_inferiority_score(self, board: Board, move: Move) -> float:
+        """ 
+        Calculates a score for how bad the move is.
+        
+        If the move is surrounded by opponent's tiles, it's a bad move.
+        """
+        
+        inferior_score = 0
+
+        # Get number of opponent's stones surrounding my move
+        num_of_opp_neighbours = len(self.get_neighbours_of_colour(board, move, Colour.opposite(self._colour)))
+
+        # If the move is surrounded by 5 or 6 of opponent's stones, return a high score 
+        if num_of_opp_neighbours == 6 or num_of_opp_neighbours == 5:
+            inferior_score += 999
+        
+        inferior_score += num_of_opp_neighbours * self.weights['connection_weight']
+        return inferior_score
+
+        
 
     def find_two_bridge_saving_moves(self, board: Board) -> list[Move]:
         """ 

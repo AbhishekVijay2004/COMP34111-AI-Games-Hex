@@ -2,6 +2,7 @@ from math import log, sqrt
 from itertools import combinations
 import random
 import time
+import heapq
 
 from src.AgentBase import AgentBase
 from src.Board import Board
@@ -227,6 +228,41 @@ class MCTSAgent(AgentBase):
         score -= inferiority_score
 
         return score
+    
+    def evaluate_defensive_position(self, board: Board, move: tuple[int, int]) -> float:
+        """ Evaluate move's defensive value. """
+        
+        score = 0
+
+        # Check if move blocks opponent's critical paths
+        opp_paths = self.find_critical_paths(board, Colour.opposite(self._colour))
+        for path in opp_paths:
+            if move in path:
+                score += self.weights['defensive_weight']  # High priority for blocking critical paths
+                break
+
+        return score
+    
+    def find_critical_paths(self, board: Board, player: Colour) -> list[list[tuple[int, int]]]:
+        """Find potentially winning paths for a player"""
+
+        paths = []
+        if player == Colour.RED:
+            # Look for top-bottom connections
+            for j in range(board.size):
+                if board.tiles[0][j].colour == player:
+                    path = self._trace_path(board, (0, j), player, 'vertical')
+                    if path:
+                        paths.append(path)
+        else:
+            # Look for left-right connections
+            for i in range(board.size):
+                if board.tiles[i][0].colour == player:
+                    path = self._trace_path(board, (i, 0), player, 'horizontal')
+                    if path:
+                        paths.append(path)
+
+        return paths
     
     def should_we_swap(self, opp_move: Move) -> bool:
         """ Returns True if we should swap, False otherwise. """
@@ -653,3 +689,54 @@ class MCTSAgent(AgentBase):
                             saving_moves.append(Move(x - 1, y + 1))
 
         return saving_moves
+
+    def _trace_path(self, board: Board, start: tuple[int, int], player: Colour, direction: str) -> list[tuple[int, int]]:
+        """
+        Trace a potential winning path from start position using A*.
+        Returns shortest path if one exists, otherwise empty list.
+        
+        Args:
+            board: Current game board
+            start: Starting position (x,y)
+            player: Player color to trace for
+            direction: 'vertical' for RED (top-bottom), 'horizontal' for BLUE (left-right)
+        """
+        open_list = [] # Discovered, but not visited, nodes
+        # heapq is a min-heap priority queue (smallest value first, aka closest distance to target)
+        # This is used for the open_list
+        heapq.heappush(open_list, (0, start, [start]))
+
+        visited = set() # Visited nodes
+        visited.add(start)
+
+        target = board.size - 1
+            
+        while open_list:
+            f, (x, y), path = heapq.heappop(open_list)
+
+            # Check winning condition
+            if (direction == 'vertical' and x == target) or \
+               (direction == 'horizontal' and y == target):
+                return path
+            
+            # Check all possible directions
+            for dx, dy in [(0,1), (1,0), (1,-1), (0,-1), (-1,0), (-1,1)]:
+                nx, ny = x + dx, y + dy
+                if (0 <= nx < board.size) and (0 <= ny < board.size) and (nx, ny) not in visited: 
+                    if board.tiles[nx][ny].colour == player or board.tiles[nx][ny].colour is None:
+                        visited.add((nx, ny))
+                        g = len(path) # g(n) is the cost to reach this node, aka the path length
+                        h = self.distance_to_target(nx, ny, target, direction) # h(n) is the estimated cost to target
+                        f = g + h # f(n) = g(n) + h(n)
+                        heapq.heappush(open_list, (f, (nx, ny), path + [(nx, ny)]))
+
+        # No path found
+        return []
+
+
+    def distance_to_target(self, x: int, y: int, target: int, direction: str) -> int:
+        """ This is used in _trace_path() to calculate the estimated cost to the target heuristic. """
+        if direction == 'vertical':
+            return target - x
+        else:
+            return target - y
